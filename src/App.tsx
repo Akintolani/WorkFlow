@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   CheckCircle2, Circle, Trash2, Clock, 
   AlertCircle, Cloud, CloudOff, Plus, AlertTriangle, Sparkles, Wand2, Sun, Moon, Workflow, Play, Archive, ChevronDown, ChevronUp, LogOut, Mail, Lock, Search, BarChart3, Calendar,
-  Pause, RotateCcw, ShieldAlert, Activity, GitBranch, Target, TrendingUp, TrendingDown, CheckSquare, ListChecks, Volume2
+  Pause, RotateCcw, ShieldAlert, Activity, GitBranch, Target, TrendingUp, TrendingDown, CheckSquare, ListChecks, Volume2, BrainCircuit, ArrowRight, ArrowLeft
 } from 'lucide-react';
 
 // Firebase Imports
@@ -102,6 +102,35 @@ const callGeminiWithRetry = async (prompt: string, systemInstruction: string, js
   }
 };
 
+// --- Alarm Helper ---
+const playAlarmFor30Seconds = () => {
+  try {
+    const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContext) return;
+    const ctx = new AudioContext();
+    for (let i = 0; i < 30; i++) {
+      const time1 = ctx.currentTime + i;
+      const time2 = ctx.currentTime + i + 0.2;
+      const playBeep = (t: number) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(850, t);
+        gain.gain.setValueAtTime(0.5, t);
+        gain.gain.exponentialRampToValueAtTime(0.01, t + 0.1);
+        osc.start(t);
+        osc.stop(t + 0.1);
+      };
+      playBeep(time1);
+      playBeep(time2);
+    }
+  } catch(e) {
+    console.error("Audio API error", e);
+  }
+};
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
@@ -151,8 +180,11 @@ export default function App() {
 
   // Assistant Voice State
   const [assistantVoice, setAssistantVoice] = useState<string>('susan');
+  const [showLandingPage, setShowLandingPage] = useState<boolean>(true);
 
   const notifiedTasksRef = useRef<Set<string>>(new Set());
+  const hasAnnouncedOverloadRef = useRef<boolean>(false);
+  const hasWelcomedRef = useRef<boolean>(false);
 
   const showToast = (message: string, type: string = 'success') => {
     setToast({ message, type });
@@ -160,10 +192,19 @@ export default function App() {
   };
 
   // --- Speech Synthesis Router ---
-  const speakAnnouncement = (text: string, voiceAlias: string) => {
-    if (!('speechSynthesis' in window)) return;
+  const speakAnnouncement = (text: string, voiceAlias: string, onEndCallback?: () => void) => {
+    if (!('speechSynthesis' in window)) {
+      if (onEndCallback) onEndCallback();
+      return;
+    }
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
+    
+    if (onEndCallback) {
+      utterance.onend = onEndCallback;
+      utterance.onerror = onEndCallback;
+    }
+
     const voices = window.speechSynthesis.getVoices();
     const enVoices = voices.filter(v => v.lang.startsWith('en'));
     
@@ -178,10 +219,8 @@ export default function App() {
       } else if (voiceAlias === 'jason') {
         selectedVoice = enVoices.find(v => v.name.includes('Arthur') || v.name.includes('Mark') || (v.lang === 'en-US' && v.name.includes('Male'))) || enVoices[3 % enVoices.length];
       } else if (voiceAlias === 'lola') {
-        // Prioritize Nigerian Female, fallback to South African or a generic alternative
         selectedVoice = enVoices.find(v => v.lang === 'en-NG' && v.name.includes('Female')) || enVoices.find(v => v.lang.includes('NG')) || enVoices.find(v => v.lang === 'en-ZA' && v.name.includes('Female')) || enVoices[4 % enVoices.length];
       } else if (voiceAlias === 'tunde') {
-        // Prioritize Nigerian Male, fallback to South African or a generic alternative
         selectedVoice = enVoices.find(v => v.lang === 'en-NG' && v.name.includes('Male')) || enVoices.find(v => v.lang.includes('NG') && v.name.includes('Male')) || enVoices.find(v => v.lang === 'en-ZA' && v.name.includes('Male')) || enVoices[5 % enVoices.length];
       }
       if (selectedVoice) utterance.voice = selectedVoice;
@@ -189,7 +228,6 @@ export default function App() {
     window.speechSynthesis.speak(utterance);
   };
 
-  // Ensure voices are loaded to prevent skipping the first time
   useEffect(() => {
     if ('speechSynthesis' in window) {
       window.speechSynthesis.onvoiceschanged = () => {
@@ -197,6 +235,17 @@ export default function App() {
       };
     }
   }, []);
+
+  // Trigger Welcome Voice Once Per Session
+  useEffect(() => {
+    if (user && !user.isAnonymous && !isAuthLoading && !hasWelcomedRef.current && !showLandingPage) {
+      hasWelcomedRef.current = true;
+      setTimeout(() => {
+        const name = assistantVoice.charAt(0).toUpperCase() + assistantVoice.slice(1);
+        speakAnnouncement(`Welcome to work flow, Your work assistant, I am ${name} and I will be your personal assistant.`, assistantVoice);
+      }, 1500);
+    }
+  }, [user, isAuthLoading, showLandingPage, assistantVoice]);
 
   useEffect(() => {
     const script = document.createElement('script');
@@ -226,6 +275,72 @@ export default function App() {
       if (document.head.contains(script)) document.head.removeChild(script);
     };
   }, []);
+
+  // Monitor Q1 tasks to automatically announce cognitive overload exactly ONCE when threshold is reached
+  useEffect(() => {
+    const q1Count = tasks.filter(t => t.quadrant === 'Q1' && t.status !== 'completed').length;
+    if (q1Count >= 4) {
+      if (!hasAnnouncedOverloadRef.current && !showLandingPage) {
+        speakAnnouncement(`Cognitive Workload Warning. Your Q 1 quadrant contains ${q1Count} tasks. Executive bottleneck warning is active.`, assistantVoice);
+        hasAnnouncedOverloadRef.current = true;
+      }
+    } else {
+      hasAnnouncedOverloadRef.current = false;
+    }
+  }, [tasks, assistantVoice, showLandingPage]);
+
+  // Nudge logic interval
+  useEffect(() => {
+    const checkNudgesAndEscalations = async () => {
+      const now = new Date();
+      const nowTime = now.getTime();
+      const currentTimeString = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+
+      tasks.forEach(async (task) => {
+        if (task.status === 'completed' || !task.deadline) return;
+        
+        const taskTime = new Date(task.deadline).getTime();
+        const diffMinutes = Math.round((taskTime - nowTime) / (1000 * 60));
+        
+        if (diffMinutes < 0 && task.quadrant === 'Q2' && user) {
+          const taskRef = doc(db, 'users', user.uid, 'tasks', task.id);
+          await updateDoc(taskRef, { quadrant: 'Q1' });
+          showToast(`Escalation: "${task.title}" running past timeline; moved to Q1 Crisis`, 'error');
+        }
+
+        const targetIntervals = [30, 20, 15, 5, 0];
+        if (targetIntervals.includes(diffMinutes)) {
+          const nudgeId = `${task.id}-${diffMinutes}`;
+          if (!notifiedTasksRef.current.has(nudgeId)) {
+            notifiedTasksRef.current.add(nudgeId);
+            
+            if (diffMinutes === 0) {
+              const msgText = `Time's up for task: ${task.title}`;
+              setNudgeMessage(msgText);
+              setTimeout(() => setNudgeMessage(null), 10000); 
+
+              if ('Notification' in window && Notification.permission === 'granted') {
+                new Notification('WorkFlow Alert', { body: msgText, requireInteraction: true });
+              }
+              speakAnnouncement(`It is time for your task: ${task.title}.`, assistantVoice, playAlarmFor30Seconds);
+            } else {
+              const msgText = `Upcoming in ${diffMinutes} mins: ${task.title}`;
+              setNudgeMessage(msgText);
+              setTimeout(() => setNudgeMessage(null), 10000); 
+
+              if ('Notification' in window && Notification.permission === 'granted') {
+                new Notification('WorkFlow Alert', { body: msgText, requireInteraction: true });
+              }
+              speakAnnouncement(`The time is ${currentTimeString}, you have ${task.title} in ${diffMinutes} minutes.`, assistantVoice);
+            }
+          }
+        }
+      });
+    };
+    const intervalId = setInterval(checkNudgesAndEscalations, 30000);
+    checkNudgesAndEscalations(); 
+    return () => clearInterval(intervalId);
+  }, [tasks, assistantVoice]);
 
   useEffect(() => {
     let interval: any = null;
@@ -294,47 +409,6 @@ export default function App() {
       unsubscribe();
     };
   }, [user]);
-
-  // Nudge logic interval
-  useEffect(() => {
-    const checkNudgesAndEscalations = async () => {
-      const now = new Date();
-      const nowTime = now.getTime();
-      const currentTimeString = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-
-      tasks.forEach(async (task) => {
-        if (task.status === 'completed' || !task.deadline) return;
-        
-        const taskTime = new Date(task.deadline).getTime();
-        const diffMinutes = Math.round((taskTime - nowTime) / (1000 * 60));
-        
-        if (diffMinutes < 0 && task.quadrant === 'Q2' && user) {
-          const taskRef = doc(db, 'users', user.uid, 'tasks', task.id);
-          await updateDoc(taskRef, { quadrant: 'Q1' });
-          showToast(`Escalation: "${task.title}" running past timeline; moved to Q1 Crisis`, 'error');
-        }
-
-        const targetIntervals = [30, 20, 15, 5];
-        if (targetIntervals.includes(diffMinutes)) {
-          const nudgeId = `${task.id}-${diffMinutes}`;
-          if (!notifiedTasksRef.current.has(nudgeId)) {
-            notifiedTasksRef.current.add(nudgeId);
-            const msgText = `Upcoming in ${diffMinutes} mins: ${task.title}`;
-            setNudgeMessage(msgText);
-            setTimeout(() => setNudgeMessage(null), 10000); 
-
-            if ('Notification' in window && Notification.permission === 'granted') {
-              new Notification('WorkFlow Alert', { body: msgText, requireInteraction: true });
-            }
-            speakAnnouncement(`The time is ${currentTimeString}, you have ${task.title} in ${diffMinutes} minutes.`, assistantVoice);
-          }
-        }
-      });
-    };
-    const intervalId = setInterval(checkNudgesAndEscalations, 30000);
-    checkNudgesAndEscalations(); 
-    return () => clearInterval(intervalId);
-  }, [tasks, assistantVoice]);
 
   const calculateQuadrant = (taskDeadline: string, taskIsImportant: boolean): string => {
     let isUrgent = false;
@@ -518,7 +592,7 @@ export default function App() {
     setManualTriageSelections({});
     setShowTriageModal(true);
     const q1Count = tasks.filter(t => t.quadrant === 'Q1' && t.status !== 'completed').length;
-    speakAnnouncement(`Cognitive Workload Warning. Your Do First quadrant is overloaded with ${q1Count} tasks. Please manually review and defer non-critical tasks to protect your focus and balance your workload.`, assistantVoice);
+    speakAnnouncement(`Opening Workload Triage. Please manually review and defer non-critical tasks to protect your focus and balance your workload.`, assistantVoice);
   };
 
   const applyManualTriage = async () => {
@@ -691,15 +765,78 @@ export default function App() {
   }
 
   if (!user || user.isAnonymous) {
+    if (showLandingPage) {
+      return (
+        <div className={`min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 transition-colors duration-300 font-sans ${theme.appBg}`}>
+          <div className={`w-full max-w-5xl p-6 sm:p-12 rounded-3xl border shadow-2xl flex flex-col items-center text-center ${theme.card}`}>
+            <div className="w-20 h-20 bg-blue-500/10 rounded-3xl flex items-center justify-center mb-6 border border-blue-500/20">
+              <Workflow className="w-10 h-10 text-blue-600 dark:text-blue-400" />
+            </div>
+            <h1 className={`text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight mb-6 ${theme.textMain}`}>
+              Welcome to <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-500 to-purple-600">WorkFlow</span>
+            </h1>
+            <p className={`text-base sm:text-lg max-w-2xl mb-12 leading-relaxed ${theme.textMuted}`}>
+              An advanced work assistant system designed to eliminate cognitive overload. Sort your tasks using the Eisenhower Matrix, proactively balance your schedule with Workload Triage, and track your performance with deep analytics.
+            </p>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full mb-12 text-left">
+              <div className={`p-6 rounded-2xl border ${isDarkMode ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                <div className="w-12 h-12 rounded-xl bg-blue-500/10 flex items-center justify-center mb-4">
+                  <ListChecks className="w-6 h-6 text-blue-500" />
+                </div>
+                <h3 className={`text-lg font-bold mb-2 ${theme.textMain}`}>Task Sorting</h3>
+                <p className={`text-sm ${theme.textMuted}`}>Dynamically categorizes your to-dos into the Eisenhower Matrix based on urgency and importance variables.</p>
+              </div>
+              <div className={`p-6 rounded-2xl border ${isDarkMode ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                <div className="w-12 h-12 rounded-xl bg-purple-500/10 flex items-center justify-center mb-4">
+                  <BrainCircuit className="w-6 h-6 text-purple-500" />
+                </div>
+                <h3 className={`text-lg font-bold mb-2 ${theme.textMain}`}>Workload Triage</h3>
+                <p className={`text-sm ${theme.textMuted}`}>Automatically detects executive bottlenecks and alerts you to manually defer non-critical tasks.</p>
+              </div>
+              <div className={`p-6 rounded-2xl border ${isDarkMode ? 'bg-slate-900/50 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                <div className="w-12 h-12 rounded-xl bg-emerald-500/10 flex items-center justify-center mb-4">
+                  <BarChart3 className="w-6 h-6 text-emerald-500" />
+                </div>
+                <h3 className={`text-lg font-bold mb-2 ${theme.textMain}`}>Weekly Analytics Report</h3>
+                <p className={`text-sm ${theme.textMuted}`}>Generates a deep diagnostic report of your past 7 days to evaluate your executive task execution.</p>
+              </div>
+            </div>
+
+            <button 
+              onClick={() => setShowLandingPage(false)}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-lg px-8 sm:px-12 py-4 rounded-full transition-all transform hover:scale-105 shadow-lg flex items-center gap-3"
+            >
+              Enter Workspace <ArrowRight className="w-5 h-5" />
+            </button>
+          </div>
+          
+          <div className="mt-8 flex items-center gap-4">
+            <button onClick={() => setIsDarkMode(!isDarkMode)} className={`p-3 rounded-full transition-all ${isDarkMode ? 'bg-slate-800 text-amber-400 hover:bg-slate-700 shadow-lg border border-slate-700' : 'bg-white text-indigo-600 hover:bg-slate-50 shadow-lg border border-slate-200'}`} title="Toggle Theme">
+              {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className={`min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 transition-colors duration-300 font-sans ${theme.appBg}`}>
+        <div className="w-full max-w-md mb-4 flex justify-start">
+          <button 
+            onClick={() => setShowLandingPage(true)}
+            className={`flex items-center gap-2 text-sm font-medium transition-colors ${theme.textMuted} hover:${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}
+          >
+            <ArrowLeft className="w-4 h-4" /> Back to Home
+          </button>
+        </div>
         <div className={`w-full max-w-md p-6 sm:p-8 rounded-2xl border ${theme.card}`}>
           <div className="flex flex-col items-center mb-8">
             <div className="w-12 h-12 bg-blue-500/20 rounded-xl flex items-center justify-center mb-4">
               <Workflow className="w-8 h-8 text-blue-500" />
             </div>
             <h1 className={`text-2xl font-bold tracking-tight ${theme.textMain}`}>WorkFlow</h1>
-            <p className={`text-sm mt-1 ${theme.textMuted}`}>your work assistant</p>
+            <p className={`text-sm mt-1 text-center font-medium ${theme.textMuted}`}>YourWork Assistant</p>
           </div>
 
           <button onClick={handleGoogleAuth} className="w-full flex items-center justify-center gap-3 bg-white text-slate-900 border border-slate-200 hover:bg-slate-50 px-4 py-3 rounded-xl font-medium transition-colors mb-6 shadow-sm">
@@ -866,7 +1003,7 @@ export default function App() {
             <h1 className={`text-xl font-bold tracking-tight flex items-center gap-2 ${theme.textMain}`}>
               <Workflow className="w-6 h-6 text-blue-500" /> WorkFlow
             </h1>
-            <p className={`text-[10px] ${theme.textMuted} font-semibold tracking-widest uppercase mt-0.5`}>your work assistant</p>
+            <p className={`text-[10px] ${theme.textMuted} font-semibold tracking-widest uppercase mt-0.5`}>Work Assistant</p>
           </div>
           
           <div className="flex items-center gap-3 sm:gap-4 text-sm w-full md:w-auto overflow-x-auto pb-2 md:pb-0 custom-scrollbar">
