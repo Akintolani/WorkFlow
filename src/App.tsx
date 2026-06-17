@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   CheckCircle2, Circle, Trash2, Clock, 
   AlertCircle, Cloud, CloudOff, Plus, AlertTriangle, Sparkles, Wand2, Sun, Moon, Workflow, Play, Archive, ChevronDown, ChevronUp, LogOut, Mail, Lock, Search, BarChart3, Calendar,
-  Pause, RotateCcw, ShieldAlert, Activity, GitBranch, Target, TrendingUp, TrendingDown, CheckSquare
+  Pause, RotateCcw, ShieldAlert, Activity, GitBranch, Target, TrendingUp, TrendingDown, CheckSquare, ListChecks, Volume2
 } from 'lucide-react';
 
 // Firebase Imports
@@ -144,11 +144,13 @@ export default function App() {
   const [isFocusActive, setIsFocusActive] = useState<boolean>(false);
   const [focusMode, setFocusMode] = useState<'work' | 'break'>('work');
 
-  // AI Triage & Decomposition
+  // Manual Triage & Decomposition
   const [showTriageModal, setShowTriageModal] = useState<boolean>(false);
-  const [isTriaging, setIsTriaging] = useState<boolean>(false);
-  const [triageSuggestions, setTriageSuggestions] = useState<any[]>([]);
+  const [manualTriageSelections, setManualTriageSelections] = useState<Record<string, string>>({});
   const [isDecomposingId, setIsDecomposingId] = useState<string | null>(null);
+
+  // Assistant Voice State
+  const [assistantVoice, setAssistantVoice] = useState<string>('susan');
 
   const notifiedTasksRef = useRef<Set<string>>(new Set());
 
@@ -156,6 +158,45 @@ export default function App() {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
   };
+
+  // --- Speech Synthesis Router ---
+  const speakAnnouncement = (text: string, voiceAlias: string) => {
+    if (!('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    const voices = window.speechSynthesis.getVoices();
+    const enVoices = voices.filter(v => v.lang.startsWith('en'));
+    
+    if (enVoices.length > 0) {
+      let selectedVoice;
+      if (voiceAlias === 'susan') {
+        selectedVoice = enVoices.find(v => v.name.includes('Samantha') || v.name.includes('Zira') || v.name.includes('Female')) || enVoices[0];
+      } else if (voiceAlias === 'mike') {
+        selectedVoice = enVoices.find(v => v.name.includes('Daniel') || v.name.includes('David') || v.name.includes('Male')) || enVoices[1 % enVoices.length];
+      } else if (voiceAlias === 'emma') {
+        selectedVoice = enVoices.find(v => v.name.includes('Victoria') || v.name.includes('Karen') || (v.lang === 'en-GB' && v.name.includes('Female'))) || enVoices[2 % enVoices.length];
+      } else if (voiceAlias === 'jason') {
+        selectedVoice = enVoices.find(v => v.name.includes('Arthur') || v.name.includes('Mark') || (v.lang === 'en-US' && v.name.includes('Male'))) || enVoices[3 % enVoices.length];
+      } else if (voiceAlias === 'lola') {
+        // Prioritize Nigerian Female, fallback to South African or a generic alternative
+        selectedVoice = enVoices.find(v => v.lang === 'en-NG' && v.name.includes('Female')) || enVoices.find(v => v.lang.includes('NG')) || enVoices.find(v => v.lang === 'en-ZA' && v.name.includes('Female')) || enVoices[4 % enVoices.length];
+      } else if (voiceAlias === 'tunde') {
+        // Prioritize Nigerian Male, fallback to South African or a generic alternative
+        selectedVoice = enVoices.find(v => v.lang === 'en-NG' && v.name.includes('Male')) || enVoices.find(v => v.lang.includes('NG') && v.name.includes('Male')) || enVoices.find(v => v.lang === 'en-ZA' && v.name.includes('Male')) || enVoices[5 % enVoices.length];
+      }
+      if (selectedVoice) utterance.voice = selectedVoice;
+    }
+    window.speechSynthesis.speak(utterance);
+  };
+
+  // Ensure voices are loaded to prevent skipping the first time
+  useEffect(() => {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.onvoiceschanged = () => {
+        window.speechSynthesis.getVoices();
+      };
+    }
+  }, []);
 
   useEffect(() => {
     const script = document.createElement('script');
@@ -196,16 +237,16 @@ export default function App() {
         showToast("Focus session complete! Time to take a short break.", "success");
         setFocusMode('break');
         setFocusTimeLeft(5 * 60);
-        if ('speechSynthesis' in window) window.speechSynthesis.speak(new SpeechSynthesisUtterance("Focus session complete. Time to take a short break!"));
+        speakAnnouncement("Focus session complete. Time to take a short break!", assistantVoice);
       } else {
         showToast("Break complete! Ready to focus again?", "success");
         setFocusMode('work');
         setFocusTimeLeft(25 * 60);
-        if ('speechSynthesis' in window) window.speechSynthesis.speak(new SpeechSynthesisUtterance("Break complete. Time to focus again!"));
+        speakAnnouncement("Break complete. Time to focus again!", assistantVoice);
       }
     }
     return () => clearInterval(interval);
-  }, [isFocusActive, focusTimeLeft, focusMode]);
+  }, [isFocusActive, focusTimeLeft, focusMode, assistantVoice]);
 
   const handleGoogleAuth = async () => {
     try { setAuthError(''); await signInWithPopup(auth, new GoogleAuthProvider()); } 
@@ -254,6 +295,7 @@ export default function App() {
     };
   }, [user]);
 
+  // Nudge logic interval
   useEffect(() => {
     const checkNudgesAndEscalations = async () => {
       const now = new Date();
@@ -284,11 +326,7 @@ export default function App() {
             if ('Notification' in window && Notification.permission === 'granted') {
               new Notification('WorkFlow Alert', { body: msgText, requireInteraction: true });
             }
-            if ('speechSynthesis' in window) {
-              window.speechSynthesis.cancel(); 
-              const utterance = new SpeechSynthesisUtterance(`The time is ${currentTimeString}, you have ${task.title} in ${diffMinutes} minutes.`);
-              window.speechSynthesis.speak(utterance);
-            }
+            speakAnnouncement(`The time is ${currentTimeString}, you have ${task.title} in ${diffMinutes} minutes.`, assistantVoice);
           }
         }
       });
@@ -296,7 +334,7 @@ export default function App() {
     const intervalId = setInterval(checkNudgesAndEscalations, 30000);
     checkNudgesAndEscalations(); 
     return () => clearInterval(intervalId);
-  }, [tasks]);
+  }, [tasks, assistantVoice]);
 
   const calculateQuadrant = (taskDeadline: string, taskIsImportant: boolean): string => {
     let isUrgent = false;
@@ -460,46 +498,50 @@ export default function App() {
       const systemInstruction = `You are an elite corporate productivity consultant. Analyze the quantitative matrix variables provided. Give a dense, highly specialized two-sentence strategic diagnostic outlining focus constraints and an immediate workload balance recommendation based on the Eisenhower method.`;
       const analysisResult = await callGeminiWithRetry(prompt, systemInstruction);
       setAiAnalyticsReport(analysisResult);
+      speakAnnouncement(analysisResult, assistantVoice);
     } catch (e) {
-      setAiAnalyticsReport("System experienced an optimization timeout. Please check your data connectivity infrastructure.");
+      const errMsg = "System experienced an optimization timeout. Please check your data connectivity infrastructure.";
+      setAiAnalyticsReport(errMsg);
+      speakAnnouncement(errMsg, assistantVoice);
     }
     setIsGeneratingReport(false);
   };
 
-  const handleAITriage = async () => {
-    setIsTriaging(true);
-    try {
-      const prompt = `Current date: ${new Date().toISOString()}. Overloaded Q1 tasks: ${JSON.stringify(groupedTasks.Q1.map(t => ({ id: t.id, title: t.title, deadline: t.deadline })))}. Advise which tasks can be programmatically demoted to Q2 (Schedule) to prevent burnout.`;
-      const systemInstruction = `You are a workload balancing AI. Return suggestions matching the schema, selecting which tasks to move to 'Q2' or keep in 'Q1', along with a brief professional justification. Ensure IDs match perfectly.`;
-      const schema = {
-        type: "OBJECT",
-        properties: {
-          suggestions: {
-            type: "ARRAY",
-            items: {
-              type: "OBJECT",
-              properties: { id: { type: "STRING" }, title: { type: "STRING" }, recommendedQuadrant: { type: "STRING" }, justification: { type: "STRING" } },
-              required: ["id", "title", "recommendedQuadrant", "justification"]
-            }
-          }
-        }
-      };
-      const result = await callGeminiWithRetry(prompt, systemInstruction, schema);
-      if (result && result.suggestions) { setTriageSuggestions(result.suggestions); setShowTriageModal(true); } 
-      else showToast("Triage completed but no suggestions were returned.", "info");
-    } catch (e) { showToast("Failed to compile AI triage recommendation.", "error"); }
-    setIsTriaging(false);
+  const handleOpenAnalytics = () => {
+    setShowAnalyticsModal(true);
+    const stats = getWeeklyStats();
+    const announcement = `Weekly Performance Report. Your hard data analytics covering the past 7 days of executive task execution. Created, ${stats.createdCount}. Completed, ${stats.completedCount}. Best Day, ${stats.mostProdDay}. Worst Day, ${stats.leastProdDay}.`;
+    speakAnnouncement(announcement, assistantVoice);
   };
 
-  const applyTriageSuggestions = async () => {
+  const handleOpenTriage = () => {
+    setManualTriageSelections({});
+    setShowTriageModal(true);
+    const q1Count = tasks.filter(t => t.quadrant === 'Q1' && t.status !== 'completed').length;
+    speakAnnouncement(`Cognitive Workload Warning. Your Do First quadrant is overloaded with ${q1Count} tasks. Please manually review and defer non-critical tasks to protect your focus and balance your workload.`, assistantVoice);
+  };
+
+  const applyManualTriage = async () => {
     if (!user) return;
     try {
-      for (const sug of triageSuggestions) {
-        if (sug.recommendedQuadrant === 'Q2') await updateDoc(doc(db, 'users', user.uid, 'tasks', sug.id), { quadrant: 'Q2' });
+      let updatedCount = 0;
+      for (const [taskId, newQuad] of Object.entries(manualTriageSelections)) {
+        const task = tasks.find(t => t.id === taskId);
+        if (task && task.quadrant !== newQuad) {
+          await updateDoc(doc(db, 'users', user.uid, 'tasks', taskId), { quadrant: newQuad });
+          updatedCount++;
+        }
       }
-      showToast("AI Workload Triage successfully applied", "success");
-      setShowTriageModal(false); setTriageSuggestions([]);
-    } catch (e) { showToast("Failed to apply all triage modifications", "error"); }
+      if (updatedCount > 0) {
+        showToast(`Successfully moved ${updatedCount} tasks.`, "success");
+      } else {
+        showToast("No changes made.", "info");
+      }
+      setShowTriageModal(false);
+      setManualTriageSelections({});
+    } catch (e) {
+      showToast("Failed to apply triage modifications", "error");
+    }
   };
 
   const handleBrainDump = async () => {
@@ -524,11 +566,23 @@ export default function App() {
     setIsAskingNext(true);
     try {
       const pendingTasks = tasks.filter(t => t.status !== 'completed').map(t => ({ title: t.title, deadline: t.deadline, quadrant: t.quadrant }));
-      if (pendingTasks.length === 0) { setAiRecommendation("You have no pending tasks. Enjoy your free time."); setIsAskingNext(false); return; }
+      if (pendingTasks.length === 0) { 
+        const msg = "You have no pending tasks. Enjoy your free time.";
+        setAiRecommendation(msg); 
+        speakAnnouncement(msg, assistantVoice);
+        setIsAskingNext(false); 
+        return; 
+      }
       const prompt = `My pending tasks: ${JSON.stringify(pendingTasks)}`;
       const sys = `You are an Executive Assistant. Based on Eisenhower matrix quadrants and deadlines provided, identify the single most critical task to focus on RIGHT NOW. Provide a brief 1-2 sentence recommendation.`;
-      setAiRecommendation(await callGeminiWithRetry(prompt, sys));
-    } catch (e) { setAiRecommendation("Unable to reach the AI assistant. Please check your connection."); }
+      const result = await callGeminiWithRetry(prompt, sys);
+      setAiRecommendation(result);
+      speakAnnouncement(result, assistantVoice);
+    } catch (e) { 
+      const msg = "Unable to reach the AI assistant. Please check your connection.";
+      setAiRecommendation(msg); 
+      speakAnnouncement(msg, assistantVoice);
+    }
     setIsAskingNext(false);
   };
 
@@ -755,7 +809,7 @@ export default function App() {
         </div>
       )}
 
-      {/* --- BULLETPROOF RESPONSIVE TRIAGE MODAL --- */}
+      {/* --- RESPONSIVE MANUAL TRIAGE MODAL --- */}
       {showTriageModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 sm:p-6">
           <div className={`w-full max-w-xl max-h-[95vh] flex flex-col border p-5 sm:p-6 rounded-2xl shadow-2xl relative overflow-hidden ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-300'}`}>
@@ -765,26 +819,41 @@ export default function App() {
             <div className="flex-shrink-0 mb-4 sm:mb-6 pr-10">
               <div className="flex items-center gap-2 mb-1 sm:mb-2 text-amber-500">
                 <ShieldAlert className="w-6 h-6 animate-pulse" />
-                <h2 className={`text-lg sm:text-xl font-bold ${theme.textMain}`}>AI Workload Triage</h2>
+                <h2 className={`text-lg sm:text-xl font-bold ${theme.textMain}`}>Cognitive Workload Triage</h2>
               </div>
-              <p className={`text-xs sm:text-sm ${theme.textMuted}`}>Gemini has evaluated your high-priority items. Here are strategic suggestions to balance your mental state and mitigate executive fatigue.</p>
+              <p className={`text-xs sm:text-sm ${theme.textMuted}`}>Your "Do First" quadrant is overloaded. Manually review and defer non-critical tasks to protect your focus and balance your workload.</p>
             </div>
 
             <div className="flex-1 overflow-y-auto min-h-0 mb-5 sm:mb-6 pr-1 sm:pr-2 custom-scrollbar space-y-3">
-              {triageSuggestions.map((sug, idx) => (
-                <div key={idx} className={`p-3 sm:p-4 rounded-lg border ${isDarkMode ? 'bg-slate-900/40 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
-                    <span className={`font-bold text-sm leading-tight ${theme.textMain}`}>{sug.title}</span>
-                    <span className={`self-start sm:self-auto text-[10px] uppercase tracking-wider font-extrabold px-2 py-1 rounded flex-shrink-0 ${sug.recommendedQuadrant === 'Q2' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>Action: {sug.recommendedQuadrant === 'Q2' ? 'Defer to Q2' : 'Keep Q1'}</span>
+              {groupedTasks.Q1.map((task) => {
+                const selectedQuadrant = manualTriageSelections[task.id] || task.quadrant;
+                return (
+                  <div key={task.id} className={`p-3 sm:p-4 rounded-lg border ${isDarkMode ? 'bg-slate-900/40 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-2 mb-2">
+                      <span className={`font-bold text-sm leading-tight ${theme.textMain}`}>{task.title}</span>
+                      <select
+                        value={selectedQuadrant}
+                        onChange={(e) => setManualTriageSelections(prev => ({ ...prev, [task.id]: e.target.value }))}
+                        className={`text-[10px] sm:text-xs font-semibold uppercase tracking-wider rounded px-2 py-1.5 outline-none cursor-pointer border transition-colors ${
+                          isDarkMode ? 'bg-slate-800 border-slate-600 text-slate-300 hover:bg-slate-700' : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        <option value="Q1">Keep in Q1 (Do First)</option>
+                        <option value="Q2">Defer to Q2 (Schedule)</option>
+                        <option value="Q3">Move to Q3 (Delegate)</option>
+                        <option value="Q4">Move to Q4 (Delete)</option>
+                      </select>
+                    </div>
+                    {task.deadline && (
+                      <p className={`text-[10px] sm:text-xs font-medium uppercase tracking-widest opacity-80 ${theme.textMuted}`}>Deadline: {new Date(task.deadline).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+                    )}
                   </div>
-                  <p className={`text-xs sm:text-sm leading-relaxed italic ${theme.textMuted}`}>{sug.justification}</p>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             <div className="flex-shrink-0 flex flex-col sm:flex-row gap-3">
-              <button onClick={applyTriageSuggestions} className="w-full sm:flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-3 sm:py-2.5 rounded-xl text-sm transition-colors shadow-sm">Apply Adjustments</button>
-              <button onClick={() => setShowTriageModal(false)} className={`w-full sm:flex-1 font-medium py-3 sm:py-2.5 rounded-xl text-sm border transition-colors ${isDarkMode ? 'hover:bg-slate-700 border-slate-700 text-slate-300' : 'hover:bg-slate-100 border-slate-300 text-slate-700'}`}>Reject Manually</button>
+              <button onClick={applyManualTriage} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 sm:py-2.5 rounded-xl text-sm transition-colors shadow-sm">Apply Adjustments</button>
             </div>
             
           </div>
@@ -801,13 +870,35 @@ export default function App() {
           </div>
           
           <div className="flex items-center gap-3 sm:gap-4 text-sm w-full md:w-auto overflow-x-auto pb-2 md:pb-0 custom-scrollbar">
-            <button onClick={() => setShowAnalyticsModal(true)} className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-semibold tracking-wide transition-colors ${isDarkMode ? 'bg-slate-800/40 border-slate-700 text-blue-400 hover:bg-slate-800' : 'bg-white border-slate-300 text-blue-600 hover:bg-slate-50'}`} title="View Weekly Report">
+            <button onClick={handleOpenAnalytics} className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-semibold tracking-wide transition-colors ${isDarkMode ? 'bg-slate-800/40 border-slate-700 text-blue-400 hover:bg-slate-800' : 'bg-white border-slate-300 text-blue-600 hover:bg-slate-50'}`} title="View Weekly Report">
               <BarChart3 className="w-3.5 h-3.5" /> <span>Weekly Analytics</span>
             </button>
+            
+            {/* Assistant Voice Selector */}
+            <div className={`flex-shrink-0 flex items-center gap-1.5 px-2 py-1.5 rounded-md border transition-colors ${isDarkMode ? 'bg-slate-800/40 border-slate-700 text-slate-300' : 'bg-white border-slate-300 text-slate-600'}`}>
+              <Volume2 className="w-4 h-4" />
+              <select 
+                value={assistantVoice}
+                onChange={(e) => {
+                  setAssistantVoice(e.target.value);
+                  speakAnnouncement(`Hello, my name is ${e.target.options[e.target.selectedIndex].text}. I am your work assistant.`, e.target.value);
+                }}
+                className={`bg-transparent text-xs font-semibold tracking-wide outline-none cursor-pointer appearance-none ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}
+              >
+                <option value="susan">Susan</option>
+                <option value="mike">Mike</option>
+                <option value="emma">Emma</option>
+                <option value="jason">Jason</option>
+                <option value="lola">Lola</option>
+                <option value="tunde">Tunde</option>
+              </select>
+            </div>
+
             <button onClick={() => setIsDarkMode(!isDarkMode)} className={`flex-shrink-0 p-2 rounded-md transition-all ${isDarkMode ? 'hover:bg-slate-800 text-amber-400' : 'hover:bg-white text-indigo-600 shadow-sm'}`} title="Toggle Theme">
               {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
             </button>
-            {isOnline ? <span className="flex-shrink-0 flex items-center gap-1.5 text-emerald-600 dark:text-emerald-500 text-xs font-semibold tracking-wide"><Cloud className="w-4 h-4" /> <span className="hidden sm:inline">Online</span></span> : <span className="flex-shrink-0 flex items-center gap-1.5 text-amber-600 dark:text-amber-500 text-xs font-semibold tracking-wide"><CloudOff className="w-4 h-4" /> <span className="hidden sm:inline">Offline</span></span>}
+            
+            {isOnline ? <span className="flex-shrink-0 flex items-center gap-1.5 text-emerald-600 dark:text-emerald-500 text-xs font-semibold tracking-wide"><Cloud className="w-4 h-4" /> <span className="hidden lg:inline">Online</span></span> : <span className="flex-shrink-0 flex items-center gap-1.5 text-amber-600 dark:text-amber-500 text-xs font-semibold tracking-wide"><CloudOff className="w-4 h-4" /> <span className="hidden lg:inline">Offline</span></span>}
             <div className={`flex-shrink-0 w-px h-6 mx-1 ${isDarkMode ? 'bg-slate-700' : 'bg-slate-300'}`}></div>
             <div className="flex-shrink-0 flex items-center gap-2 sm:gap-3">
               <span className={`text-xs font-medium hidden md:block truncate max-w-[120px] ${theme.textMuted}`}>{user.email || 'User'}</span>
@@ -887,17 +978,16 @@ export default function App() {
           </div>
 
           {inputMode === 'manual' ? (
-            <form onSubmit={handleManualAddTask} className="flex flex-col gap-4">
-              <div className="flex flex-col gap-1.5">
+            <form onSubmit={handleManualAddTask} className="flex flex-col gap-4 w-full overflow-hidden">
+              <div className="flex flex-col gap-1.5 w-full">
                 <label className={`text-xs font-bold uppercase tracking-wider ${theme.textMuted}`}>Task Description</label>
                 <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g., Finalize the Q3 financial presentation..." className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all text-sm ${theme.input}`} required />
               </div>
               
-              {/* --- BULLETPROOF RESPONSIVE MANUAL INPUT SECTION --- */}
-              <div className="flex flex-col sm:flex-row items-end gap-4 w-full">
-                <div className="flex flex-col gap-1.5 w-full sm:flex-1">
+              <div className="flex flex-col sm:flex-row items-start sm:items-end gap-4 w-full min-w-0">
+                <div className="flex flex-col gap-1.5 w-full sm:flex-1 min-w-0">
                   <label className={`text-xs font-bold uppercase tracking-wider ${theme.textMuted}`}>Deadline <span className="opacity-60">(Optional)</span></label>
-                  <input type="datetime-local" value={deadline} onChange={(e) => setDeadline(e.target.value)} className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-sm transition-all h-[46px] ${theme.input}`} style={{ colorScheme: isDarkMode ? 'dark' : 'light' }} />
+                  <input type="datetime-local" value={deadline} onChange={(e) => setDeadline(e.target.value)} className={`w-full block max-w-full px-3 sm:px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-sm transition-all h-[46px] ${theme.input}`} style={{ colorScheme: isDarkMode ? 'dark' : 'light' }} />
                 </div>
                 <div className="flex flex-col gap-1.5 w-full sm:w-auto sm:min-w-[140px]">
                   <label className={`text-xs font-bold uppercase tracking-wider ${theme.textMuted}`}>Priority <span className="opacity-60">(Optional)</span></label>
@@ -925,7 +1015,6 @@ export default function App() {
           )}
         </section>
 
-        {/* --- BULLETPROOF RESPONSIVE WARNING BANNER --- */}
         {groupedTasks.Q1.length >= 4 && (
           <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 sm:p-5 rounded-xl border border-red-500/30 bg-red-500/10 text-red-500 gap-4 sm:gap-6 animate-fade-in shadow-sm w-full overflow-hidden">
             <div className="flex items-start sm:items-center gap-3 w-full sm:w-auto min-w-0">
@@ -935,9 +1024,9 @@ export default function App() {
                 <p className="text-xs opacity-90 mt-1 leading-relaxed">Your Q1 quadrant contains {groupedTasks.Q1.length} tasks. Executive bottleneck warning is active.</p>
               </div>
             </div>
-            <button onClick={handleAITriage} disabled={isTriaging} className="w-full sm:w-auto flex-shrink-0 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white font-medium px-5 py-3 sm:py-2.5 rounded-lg text-xs sm:text-sm transition-colors disabled:opacity-50 shadow-sm">
-              {isTriaging ? <Wand2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-              AI Workload Triage
+            <button onClick={handleOpenTriage} className="w-full sm:w-auto flex-shrink-0 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white font-medium px-5 py-3 sm:py-2.5 rounded-lg text-xs sm:text-sm transition-colors shadow-sm">
+              <ListChecks className="w-4 h-4" />
+              Review Workload
             </button>
           </div>
         )}
