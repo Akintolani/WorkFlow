@@ -20,7 +20,7 @@ import {
 interface Task {
   id: string;
   title: string;
-  deadline: string; // Can be an empty string '' if no timeline is provided
+  deadline: string; 
   isImportant: boolean;
   quadrant: string;
   status: string;
@@ -29,7 +29,6 @@ interface Task {
 }
 
 // --- Firebase Initialization ---
-// Split strings to bypass GitHub Secret Scanning during CodeSandbox export
 const firebaseConfig = {
   apiKey: "AIzaSyAB9kNgAo-u" + "Ko731h4VsKo1Flg6PlC7rxc",
   authDomain: "matrixflow-b7153.firebaseapp.com",
@@ -46,7 +45,6 @@ const db = getFirestore(firebaseApp);
 const appId = typeof window !== "undefined" && (window as any).__app_id ? (window as any).__app_id : "default-app-id";
 
 // --- Gemini API Helper ---
-// Split strings to bypass GitHub Secret Scanning
 const apiKey = "AQ.Ab8RN6LgpSptaA" + "EIApT75yFCKwSKhCP" + "zXsF1GhDtjRvn-HS6Rw";
 
 const callGeminiWithRetry = async (prompt: string, systemInstruction: string, jsonSchema: any = null): Promise<any> => {
@@ -114,8 +112,6 @@ export default function App() {
   const [notificationPermission, setNotificationPermission] = useState<string>('default');
   
   const [toast, setToast] = useState<{ message: string; type: string } | null>(null);
-  
-  // Default to Light Mode as requested
   const [isDarkMode, setIsDarkMode] = useState<boolean>(false);
 
   // Auth Forms
@@ -240,14 +236,11 @@ export default function App() {
     const unsubscribe = onSnapshot(q, 
       (snapshot) => {
         const tasksData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Task[];
-        
-        // Safely sort assuming some tasks may not have a deadline
         tasksData.sort((a, b) => {
           const aTime = a.deadline ? new Date(a.deadline).getTime() : 9999999999999;
           const bTime = b.deadline ? new Date(b.deadline).getTime() : 9999999999999;
           return aTime - bTime;
         });
-
         setTasks(tasksData);
         setSyncing(false);
       },
@@ -268,7 +261,6 @@ export default function App() {
       const currentTimeString = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
       tasks.forEach(async (task) => {
-        // Skip completed tasks and tasks without a deadline
         if (task.status === 'completed' || !task.deadline) return;
         
         const taskTime = new Date(task.deadline).getTime();
@@ -306,21 +298,16 @@ export default function App() {
     return () => clearInterval(intervalId);
   }, [tasks]);
 
-  // --- Refined Eisenhower Matrix Algorithmic Rules ---
   const calculateQuadrant = (taskDeadline: string, taskIsImportant: boolean): string => {
     let isUrgent = false;
-    
-    // Check if task has a timeline and if it is within 24 hours
     if (taskDeadline) {
       const diffHours = (new Date(taskDeadline).getTime() - new Date().getTime()) / (1000 * 60 * 60);
       isUrgent = diffHours <= 24; 
     }
-
-    // Apply rigorous quadrant routing based on logic requirements
-    if (isUrgent && taskIsImportant) return 'Q1'; // <= 24h timeline + important
-    if (!isUrgent && taskIsImportant) return 'Q2'; // No timeline (or > 24h) + important
-    if (isUrgent && !taskIsImportant) return 'Q3'; // <= 24h timeline + not important
-    return 'Q4'; // No timeline (or > 24h) + not important
+    if (isUrgent && taskIsImportant) return 'Q1'; 
+    if (!isUrgent && taskIsImportant) return 'Q2'; 
+    if (isUrgent && !taskIsImportant) return 'Q3'; 
+    return 'Q4'; 
   };
 
   const saveTaskToDb = async (taskData: { title: string; deadline: string; isImportant: boolean }) => {
@@ -337,15 +324,9 @@ export default function App() {
 
   const handleManualAddTask = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title || !user) return; // Deadline and Priority are now strictly optional
-    
-    // Capture current values before clearing
+    if (!title || !user) return;
     const taskData = { title, deadline, isImportant };
-    
-    // Optimistically clear the form IMMEDIATELY for a snappy UX
-    setTitle(''); 
-    setDeadline(''); 
-    setIsImportant(false);
+    setTitle(''); setDeadline(''); setIsImportant(false);
 
     try {
       await saveTaskToDb(taskData);
@@ -424,7 +405,6 @@ export default function App() {
   const getWeeklyStats = () => {
     const now = new Date();
     const oneWeekAgo = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
-    
     const daysMap: Record<string, number> = {};
     for(let i = 0; i < 7; i++) {
        const d = new Date(now.getTime() - (i * 24 * 60 * 60 * 1000));
@@ -437,7 +417,6 @@ export default function App() {
     tasks.forEach(t => {
        const createdDate = new Date(t.createdAt);
        if (createdDate >= oneWeekAgo) createdCount++;
-
        if (t.status === 'completed') {
           const compDateStr = t.completedAt || (t.deadline ? t.deadline : null) || t.createdAt;
           if (compDateStr) {
@@ -479,7 +458,6 @@ export default function App() {
       const stats = getWeeklyStats();
       const prompt = `Database metrics for past 7 days: Tasks Created: ${stats.createdCount}, Completed: ${stats.completedCount}. Most Productive Day: ${stats.mostProdDay}. Least Productive Day: ${stats.leastProdDay}.`;
       const systemInstruction = `You are an elite corporate productivity consultant. Analyze the quantitative matrix variables provided. Give a dense, highly specialized two-sentence strategic diagnostic outlining focus constraints and an immediate workload balance recommendation based on the Eisenhower method.`;
-
       const analysisResult = await callGeminiWithRetry(prompt, systemInstruction);
       setAiAnalyticsReport(analysisResult);
     } catch (e) {
@@ -547,10 +525,8 @@ export default function App() {
     try {
       const pendingTasks = tasks.filter(t => t.status !== 'completed').map(t => ({ title: t.title, deadline: t.deadline, quadrant: t.quadrant }));
       if (pendingTasks.length === 0) { setAiRecommendation("You have no pending tasks. Enjoy your free time."); setIsAskingNext(false); return; }
-
       const prompt = `My pending tasks: ${JSON.stringify(pendingTasks)}`;
       const sys = `You are an Executive Assistant. Based on Eisenhower matrix quadrants and deadlines provided, identify the single most critical task to focus on RIGHT NOW. Provide a brief 1-2 sentence recommendation.`;
-      
       setAiRecommendation(await callGeminiWithRetry(prompt, sys));
     } catch (e) { setAiRecommendation("Unable to reach the AI assistant. Please check your connection."); }
     setIsAskingNext(false);
@@ -574,7 +550,6 @@ export default function App() {
     Q4: tasks.filter(t => t.quadrant === 'Q4' && t.status !== 'completed'),
   };
 
-  // --- Professional Theme Styles (Grey base for light mode) ---
   const theme = {
     appBg: isDarkMode ? 'bg-slate-900 text-slate-100' : 'bg-slate-200 text-slate-900',
     header: isDarkMode ? 'bg-slate-900/80 border-slate-800' : 'bg-slate-200/80 border-slate-300',
@@ -597,12 +572,12 @@ export default function App() {
         task.status === 'completed' ? `opacity-50 ${theme.taskCompleted}` : `${theme.taskPending}`
       } ${isOverdue ? 'ring-2 ring-amber-500/40 border-amber-500/50' : ''}`}>
         <div className="flex items-start justify-between w-full">
-          <div className="flex items-start gap-4 overflow-hidden w-full">
+          <div className="flex items-start gap-3 sm:gap-4 overflow-hidden w-full">
             <button onClick={() => toggleTaskStatus(task)} className={`mt-1 flex-shrink-0 transition-transform active:scale-75 ${task.status === 'completed' ? 'text-emerald-500' : `${theme.textMuted} hover:text-blue-500`}`}>
               {task.status === 'completed' ? <CheckCircle2 className="w-5 h-5" /> : <Circle className="w-5 h-5" />}
             </button>
             <div className="flex flex-col w-full pr-2">
-              <span className={`font-medium text-sm block w-full ${task.status === 'completed' ? `line-through opacity-70 ${theme.textMuted}` : theme.textMain}`}>
+              <span className={`font-medium text-sm block w-full break-words ${task.status === 'completed' ? `line-through opacity-70 ${theme.textMuted}` : theme.textMain}`}>
                 {task.title}
               </span>
               <div className="flex items-center flex-wrap gap-x-3 gap-y-2 mt-1.5">
@@ -635,21 +610,12 @@ export default function App() {
           </div>
           <div className="flex items-center gap-1.5 flex-shrink-0">
             {task.status !== 'completed' && (
-              <button 
-                onClick={() => handleTaskDecomposition(task)} 
-                disabled={isDecomposingId === task.id}
-                className={`p-2 rounded-md transition-colors ${isDecomposingId === task.id ? 'text-blue-500 animate-pulse' : `${theme.textMuted} hover:text-blue-500`}`}
-                title="AI Auto-Breakdown (Decompose Task)"
-              >
+              <button onClick={() => handleTaskDecomposition(task)} disabled={isDecomposingId === task.id} className={`p-2 rounded-md transition-colors ${isDecomposingId === task.id ? 'text-blue-500 animate-pulse' : `${theme.textMuted} hover:text-blue-500`}`} title="AI Auto-Breakdown (Decompose Task)">
                 {isDecomposingId === task.id ? <Wand2 className="w-4 h-4 animate-spin" /> : <GitBranch className="w-4 h-4" />}
               </button>
             )}
             {task.status !== 'completed' && (
-              <button 
-                onClick={() => { setActiveFocusTask(task); setFocusTimeLeft(25 * 60); setFocusMode('work'); setIsFocusActive(true); showToast(`Focus initiated on: ${task.title}`, 'success'); }} 
-                className={`p-2 rounded-md transition-colors ${activeFocusTask?.id === task.id ? 'text-purple-500 bg-purple-500/10' : `${theme.textMuted} hover:text-purple-500`}`}
-                title="Initiate Focus Tracking"
-              >
+              <button onClick={() => { setActiveFocusTask(task); setFocusTimeLeft(25 * 60); setFocusMode('work'); setIsFocusActive(true); showToast(`Focus initiated on: ${task.title}`, 'success'); }} className={`p-2 rounded-md transition-colors ${activeFocusTask?.id === task.id ? 'text-purple-500 bg-purple-500/10' : `${theme.textMuted} hover:text-purple-500`}`} title="Initiate Focus Tracking">
                 <Activity className="w-4 h-4" />
               </button>
             )}
@@ -672,8 +638,8 @@ export default function App() {
 
   if (!user || user.isAnonymous) {
     return (
-      <div className={`min-h-screen flex flex-col items-center justify-center p-6 transition-colors duration-300 font-sans ${theme.appBg}`}>
-        <div className={`w-full max-w-md p-8 rounded-2xl border ${theme.card}`}>
+      <div className={`min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 transition-colors duration-300 font-sans ${theme.appBg}`}>
+        <div className={`w-full max-w-md p-6 sm:p-8 rounded-2xl border ${theme.card}`}>
           <div className="flex flex-col items-center mb-8">
             <div className="w-12 h-12 bg-blue-500/20 rounded-xl flex items-center justify-center mb-4">
               <Workflow className="w-8 h-8 text-blue-500" />
@@ -682,10 +648,7 @@ export default function App() {
             <p className={`text-sm mt-1 ${theme.textMuted}`}>your work assistant</p>
           </div>
 
-          <button 
-            onClick={handleGoogleAuth}
-            className="w-full flex items-center justify-center gap-3 bg-white text-slate-900 border border-slate-200 hover:bg-slate-50 px-4 py-3 rounded-xl font-medium transition-colors mb-6 shadow-sm"
-          >
+          <button onClick={handleGoogleAuth} className="w-full flex items-center justify-center gap-3 bg-white text-slate-900 border border-slate-200 hover:bg-slate-50 px-4 py-3 rounded-xl font-medium transition-colors mb-6 shadow-sm">
             <svg className="w-5 h-5" viewBox="0 0 24 24">
               <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fillRule="evenodd" clipRule="evenodd"/>
               <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fillRule="evenodd" clipRule="evenodd"/>
@@ -736,84 +699,100 @@ export default function App() {
       )}
 
       {nudgeMessage && (
-        <div className="fixed top-6 left-1/2 transform -translate-x-1/2 z-50 bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-3 animate-fade-in border border-blue-500">
-          <AlertCircle className="w-5 h-5" />
-          <span className="font-medium text-sm tracking-wide">{nudgeMessage}</span>
+        <div className="fixed top-6 left-1/2 transform -translate-x-1/2 z-50 w-[90%] max-w-sm bg-blue-600 text-white px-5 py-3 rounded-lg shadow-lg flex items-center gap-3 animate-fade-in border border-blue-500">
+          <AlertCircle className="w-5 h-5 flex-shrink-0" />
+          <span className="font-medium text-sm tracking-wide leading-snug">{nudgeMessage}</span>
         </div>
       )}
 
+      {/* --- BULLETPROOF RESPONSIVE ANALYTICS MODAL --- */}
       {showAnalyticsModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className={`w-full max-w-2xl border p-6 rounded-2xl shadow-2xl transition-colors duration-300 relative ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-300'}`}>
-            <button onClick={() => { setShowAnalyticsModal(false); setAiAnalyticsReport(null); }} className={`absolute top-4 right-4 text-xs font-bold uppercase tracking-wider px-2 py-1 rounded transition-colors ${isDarkMode ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-200 text-slate-500'}`}>✕ Close</button>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 sm:p-6">
+          <div className={`w-full max-w-2xl max-h-[95vh] flex flex-col border p-5 sm:p-6 rounded-2xl shadow-2xl relative overflow-hidden transition-colors duration-300 ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-300'}`}>
+            <button onClick={() => { setShowAnalyticsModal(false); setAiAnalyticsReport(null); }} className={`absolute top-3 right-3 sm:top-4 sm:right-4 text-xs font-bold uppercase tracking-wider px-2 py-1 rounded transition-colors z-10 ${isDarkMode ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-200 text-slate-500'}`}>✕ Close</button>
             
-            <div className="flex items-center gap-2 mb-2">
-              <BarChart3 className="w-6 h-6 text-blue-500" />
-              <h2 className={`text-xl font-bold ${theme.textMain}`}>Weekly Performance Report</h2>
+            <div className="flex-shrink-0 mb-4 sm:mb-6 pr-10">
+              <div className="flex items-center gap-2 mb-1 sm:mb-2">
+                <BarChart3 className="w-6 h-6 text-blue-500" />
+                <h2 className={`text-lg sm:text-xl font-bold ${theme.textMain}`}>Weekly Performance Report</h2>
+              </div>
+              <p className={`text-xs sm:text-sm ${theme.textMuted}`}>Your hard data analytics covering the past 7 days of executive task execution.</p>
             </div>
-            <p className={`text-xs mb-6 ${theme.textMuted}`}>Your hard data analytics covering the past 7 days of executive task execution.</p>
             
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-              <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' : 'bg-blue-50 border-blue-200 text-blue-600'}`}>
-                <p className="text-[10px] uppercase font-bold tracking-wider opacity-80 flex items-center gap-1.5"><Plus className="w-3 h-3"/> Created</p>
-                <p className="text-3xl font-black mt-1">{weeklyStats.createdCount}</p>
+            <div className="flex-1 overflow-y-auto min-h-0 custom-scrollbar pr-1 sm:pr-2 pb-2">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 mb-5 sm:mb-6">
+                <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' : 'bg-blue-50 border-blue-200 text-blue-600'}`}>
+                  <p className="text-[10px] uppercase font-bold tracking-wider opacity-80 flex items-center gap-1.5"><Plus className="w-3 h-3"/> Created</p>
+                  <p className="text-2xl sm:text-3xl font-black mt-1">{weeklyStats.createdCount}</p>
+                </div>
+                <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-emerald-50 border-emerald-200 text-emerald-600'}`}>
+                  <p className="text-[10px] uppercase font-bold tracking-wider opacity-80 flex items-center gap-1.5"><CheckSquare className="w-3 h-3"/> Completed</p>
+                  <p className="text-2xl sm:text-3xl font-black mt-1">{weeklyStats.completedCount}</p>
+                </div>
+                <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-purple-500/10 border-purple-500/20 text-purple-400' : 'bg-purple-50 border-purple-200 text-purple-600'}`}>
+                  <p className="text-[10px] uppercase font-bold tracking-wider opacity-80 flex items-center gap-1.5"><TrendingUp className="w-3 h-3"/> Best Day</p>
+                  <p className="text-base sm:text-lg font-black mt-1 leading-tight truncate">{weeklyStats.mostProdDay}</p>
+                </div>
+                <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-amber-500/10 border-amber-500/20 text-amber-400' : 'bg-amber-50 border-amber-200 text-amber-600'}`}>
+                  <p className="text-[10px] uppercase font-bold tracking-wider opacity-80 flex items-center gap-1.5"><TrendingDown className="w-3 h-3"/> Worst Day</p>
+                  <p className="text-base sm:text-lg font-black mt-1 leading-tight truncate">{weeklyStats.leastProdDay}</p>
+                </div>
               </div>
-              <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-emerald-50 border-emerald-200 text-emerald-600'}`}>
-                <p className="text-[10px] uppercase font-bold tracking-wider opacity-80 flex items-center gap-1.5"><CheckSquare className="w-3 h-3"/> Completed</p>
-                <p className="text-3xl font-black mt-1">{weeklyStats.completedCount}</p>
-              </div>
-              <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-purple-500/10 border-purple-500/20 text-purple-400' : 'bg-purple-50 border-purple-200 text-purple-600'}`}>
-                <p className="text-[10px] uppercase font-bold tracking-wider opacity-80 flex items-center gap-1.5"><TrendingUp className="w-3 h-3"/> Best Day</p>
-                <p className="text-lg font-black mt-1 leading-tight">{weeklyStats.mostProdDay}</p>
-              </div>
-              <div className={`p-4 rounded-xl border ${isDarkMode ? 'bg-amber-500/10 border-amber-500/20 text-amber-400' : 'bg-amber-50 border-amber-200 text-amber-600'}`}>
-                <p className="text-[10px] uppercase font-bold tracking-wider opacity-80 flex items-center gap-1.5"><TrendingDown className="w-3 h-3"/> Worst Day</p>
-                <p className="text-lg font-black mt-1 leading-tight">{weeklyStats.leastProdDay}</p>
-              </div>
+
+              <button onClick={handleGenerateWeeklyReport} disabled={isGeneratingReport} className={`w-full flex items-center justify-center gap-2 border px-4 py-3 rounded-xl transition-all disabled:opacity-50 text-sm mb-4 font-semibold shadow-sm ${isDarkMode ? 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800' : 'bg-slate-100 border-slate-300 text-slate-700 hover:bg-slate-200'}`}>
+                {isGeneratingReport ? <Wand2 className="w-4 h-4 animate-spin text-blue-500" /> : <Sparkles className="w-4 h-4 text-blue-500" />}
+                {isGeneratingReport ? 'Analyzing metrics...' : 'Generate Deep AI Diagnostic'}
+              </button>
+
+              {aiAnalyticsReport && (
+                <div className={`p-4 sm:p-5 rounded-xl border transition-all duration-300 ${isDarkMode ? 'bg-blue-900/10 border-blue-500/30 text-blue-100' : 'bg-blue-50 border-blue-200 text-blue-900'}`}>
+                  <div className="flex items-center gap-1.5 mb-3"><Workflow className="w-4 h-4 text-blue-500" /><span className="text-xs font-bold uppercase tracking-wider text-blue-500">Gemini Strategic Feedback</span></div>
+                  <p className="text-xs sm:text-sm font-medium leading-relaxed italic">{aiAnalyticsReport}</p>
+                </div>
+              )}
             </div>
-
-            <button onClick={handleGenerateWeeklyReport} disabled={isGeneratingReport} className={`w-full flex items-center justify-center gap-2 border px-4 py-3 rounded-xl transition-all disabled:opacity-50 text-sm mb-4 font-semibold ${isDarkMode ? 'bg-slate-900/50 border-slate-700 text-slate-300 hover:bg-slate-800' : 'bg-slate-100 border-slate-300 text-slate-700 hover:bg-slate-200'}`}>
-              {isGeneratingReport ? <Wand2 className="w-4 h-4 animate-spin text-blue-500" /> : <Sparkles className="w-4 h-4 text-blue-500" />}
-              {isGeneratingReport ? 'Analyzing metrics...' : 'Generate Deep AI Diagnostic'}
-            </button>
-
-            {aiAnalyticsReport && (
-              <div className={`p-4 rounded-xl border transition-all duration-300 ${isDarkMode ? 'bg-blue-900/10 border-blue-500/30 text-blue-100' : 'bg-blue-50 border-blue-200 text-blue-900'}`}>
-                <div className="flex items-center gap-1.5 mb-2"><Workflow className="w-4 h-4 text-blue-500" /><span className="text-xs font-bold uppercase tracking-wider text-blue-500">Gemini Strategic Feedback</span></div>
-                <p className="text-sm font-medium leading-relaxed italic">{aiAnalyticsReport}</p>
-              </div>
-            )}
           </div>
         </div>
       )}
 
+      {/* --- BULLETPROOF RESPONSIVE TRIAGE MODAL --- */}
       {showTriageModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className={`w-full max-w-xl border p-6 rounded-2xl shadow-2xl relative ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-300'}`}>
-            <button onClick={() => setShowTriageModal(false)} className={`absolute top-4 right-4 text-xs font-bold uppercase tracking-wider px-2 py-1 rounded transition-colors ${isDarkMode ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-200 text-slate-500'}`}>✕ Cancel</button>
-            <div className="flex items-center gap-2 mb-4 text-amber-500"><ShieldAlert className="w-6 h-6 animate-pulse" /><h2 className={`text-xl font-bold ${theme.textMain}`}>AI Workload Triage Recommendations</h2></div>
-            <p className={`text-xs mb-6 ${theme.textMuted}`}>Gemini has evaluated your high-priority items. Here are strategic suggestions to balance your mental state and mitigate executive fatigue.</p>
-            <div className="max-h-60 overflow-y-auto mb-6 pr-1 custom-scrollbar">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 sm:p-6">
+          <div className={`w-full max-w-xl max-h-[95vh] flex flex-col border p-5 sm:p-6 rounded-2xl shadow-2xl relative overflow-hidden ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-300'}`}>
+            
+            <button onClick={() => setShowTriageModal(false)} className={`absolute top-3 right-3 sm:top-4 sm:right-4 text-xs font-bold uppercase tracking-wider px-2 py-1 rounded transition-colors z-10 ${isDarkMode ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-200 text-slate-500'}`}>✕ Cancel</button>
+            
+            <div className="flex-shrink-0 mb-4 sm:mb-6 pr-10">
+              <div className="flex items-center gap-2 mb-1 sm:mb-2 text-amber-500">
+                <ShieldAlert className="w-6 h-6 animate-pulse" />
+                <h2 className={`text-lg sm:text-xl font-bold ${theme.textMain}`}>AI Workload Triage</h2>
+              </div>
+              <p className={`text-xs sm:text-sm ${theme.textMuted}`}>Gemini has evaluated your high-priority items. Here are strategic suggestions to balance your mental state and mitigate executive fatigue.</p>
+            </div>
+
+            <div className="flex-1 overflow-y-auto min-h-0 mb-5 sm:mb-6 pr-1 sm:pr-2 custom-scrollbar space-y-3">
               {triageSuggestions.map((sug, idx) => (
-                <div key={idx} className={`p-3 mb-3 rounded-lg border ${isDarkMode ? 'bg-slate-900/40 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className={`font-bold text-xs ${theme.textMain}`}>{sug.title}</span>
-                    <span className={`text-[10px] uppercase tracking-wider font-extrabold px-1.5 py-0.5 rounded ${sug.recommendedQuadrant === 'Q2' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>Action: {sug.recommendedQuadrant === 'Q2' ? 'Defer to Q2' : 'Keep Q1'}</span>
+                <div key={idx} className={`p-3 sm:p-4 rounded-lg border ${isDarkMode ? 'bg-slate-900/40 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+                    <span className={`font-bold text-sm leading-tight ${theme.textMain}`}>{sug.title}</span>
+                    <span className={`self-start sm:self-auto text-[10px] uppercase tracking-wider font-extrabold px-2 py-1 rounded flex-shrink-0 ${sug.recommendedQuadrant === 'Q2' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>Action: {sug.recommendedQuadrant === 'Q2' ? 'Defer to Q2' : 'Keep Q1'}</span>
                   </div>
-                  <p className={`text-xs leading-relaxed italic ${theme.textMuted}`}>{sug.justification}</p>
+                  <p className={`text-xs sm:text-sm leading-relaxed italic ${theme.textMuted}`}>{sug.justification}</p>
                 </div>
               ))}
             </div>
-            <div className="flex gap-3">
-              <button onClick={applyTriageSuggestions} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-2.5 rounded-xl text-sm transition-colors shadow-sm">Apply AI Triage Adjustments</button>
-              <button onClick={() => setShowTriageModal(false)} className={`flex-1 font-medium py-2.5 rounded-xl text-sm border transition-colors ${isDarkMode ? 'hover:bg-slate-700 border-slate-700 text-slate-300' : 'hover:bg-slate-100 border-slate-300 text-slate-700'}`}>Reject & Manage Manually</button>
+
+            <div className="flex-shrink-0 flex flex-col sm:flex-row gap-3">
+              <button onClick={applyTriageSuggestions} className="w-full sm:flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-3 sm:py-2.5 rounded-xl text-sm transition-colors shadow-sm">Apply Adjustments</button>
+              <button onClick={() => setShowTriageModal(false)} className={`w-full sm:flex-1 font-medium py-3 sm:py-2.5 rounded-xl text-sm border transition-colors ${isDarkMode ? 'hover:bg-slate-700 border-slate-700 text-slate-300' : 'hover:bg-slate-100 border-slate-300 text-slate-700'}`}>Reject Manually</button>
             </div>
+            
           </div>
         </div>
       )}
 
       <header className={`${theme.header} backdrop-blur-md sticky top-0 z-20 shadow-sm transition-colors duration-300 border-b`}>
-        <div className="max-w-6xl mx-auto px-6 py-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div className="flex flex-col">
             <h1 className={`text-xl font-bold tracking-tight flex items-center gap-2 ${theme.textMain}`}>
               <Workflow className="w-6 h-6 text-blue-500" /> WorkFlow
@@ -821,18 +800,17 @@ export default function App() {
             <p className={`text-[10px] ${theme.textMuted} font-semibold tracking-widest uppercase mt-0.5`}>your work assistant</p>
           </div>
           
-          <div className="flex items-center gap-4 text-sm w-full md:w-auto overflow-x-auto pb-2 md:pb-0">
-
+          <div className="flex items-center gap-3 sm:gap-4 text-sm w-full md:w-auto overflow-x-auto pb-2 md:pb-0 custom-scrollbar">
             <button onClick={() => setShowAnalyticsModal(true)} className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-semibold tracking-wide transition-colors ${isDarkMode ? 'bg-slate-800/40 border-slate-700 text-blue-400 hover:bg-slate-800' : 'bg-white border-slate-300 text-blue-600 hover:bg-slate-50'}`} title="View Weekly Report">
-              <BarChart3 className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Weekly Analytics</span>
+              <BarChart3 className="w-3.5 h-3.5" /> <span>Weekly Analytics</span>
             </button>
             <button onClick={() => setIsDarkMode(!isDarkMode)} className={`flex-shrink-0 p-2 rounded-md transition-all ${isDarkMode ? 'hover:bg-slate-800 text-amber-400' : 'hover:bg-white text-indigo-600 shadow-sm'}`} title="Toggle Theme">
               {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
             </button>
-            {isOnline ? <span className="flex-shrink-0 flex items-center gap-1.5 text-emerald-600 dark:text-emerald-500 text-xs font-semibold tracking-wide"><Cloud className="w-4 h-4" /> <span className="hidden lg:inline">Online</span></span> : <span className="flex-shrink-0 flex items-center gap-1.5 text-amber-600 dark:text-amber-500 text-xs font-semibold tracking-wide"><CloudOff className="w-4 h-4" /> <span className="hidden lg:inline">Offline</span></span>}
+            {isOnline ? <span className="flex-shrink-0 flex items-center gap-1.5 text-emerald-600 dark:text-emerald-500 text-xs font-semibold tracking-wide"><Cloud className="w-4 h-4" /> <span className="hidden sm:inline">Online</span></span> : <span className="flex-shrink-0 flex items-center gap-1.5 text-amber-600 dark:text-amber-500 text-xs font-semibold tracking-wide"><CloudOff className="w-4 h-4" /> <span className="hidden sm:inline">Offline</span></span>}
             <div className={`flex-shrink-0 w-px h-6 mx-1 ${isDarkMode ? 'bg-slate-700' : 'bg-slate-300'}`}></div>
-            <div className="flex-shrink-0 flex items-center gap-3">
-              <span className={`text-xs font-medium hidden md:block ${theme.textMuted}`}>{user.email || 'User'}</span>
+            <div className="flex-shrink-0 flex items-center gap-2 sm:gap-3">
+              <span className={`text-xs font-medium hidden md:block truncate max-w-[120px] ${theme.textMuted}`}>{user.email || 'User'}</span>
               <button onClick={handleSignOut} className={`flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors text-xs font-medium ${isDarkMode ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20' : 'bg-red-50 text-red-600 hover:bg-red-100 shadow-sm'}`} title="Sign Out">
                 <LogOut className="w-4 h-4" /> <span className="hidden sm:inline">Sign Out</span>
               </button>
@@ -841,55 +819,55 @@ export default function App() {
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-6 py-8">
+      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8 w-full">
         
-        <div className={`mb-8 flex flex-col md:flex-row items-start md:items-center gap-4 justify-between border p-5 rounded-xl transition-colors duration-300 ${theme.card}`}>
-          <div className="flex-1">
+        <div className={`mb-6 sm:mb-8 flex flex-col md:flex-row items-start md:items-center gap-4 justify-between border p-4 sm:p-5 rounded-xl transition-colors duration-300 ${theme.card}`}>
+          <div className="flex-1 w-full">
             <div className="flex items-center gap-2 mb-2">
               <Sparkles className="w-4 h-4 text-blue-500" />
-              <h2 className={`text-sm font-semibold uppercase tracking-wider ${theme.textMuted}`}>AI Executive Assistant</h2>
+              <h2 className={`text-xs sm:text-sm font-semibold uppercase tracking-wider ${theme.textMuted}`}>AI Executive Assistant</h2>
             </div>
             {aiRecommendation ? (
               <p className={`font-medium text-sm md:text-base leading-relaxed ${theme.textMain}`}>{aiRecommendation}</p>
             ) : (
-              <p className={`text-sm ${theme.textMuted}`}>Request an analysis to determine your highest priority task based on the Eisenhower matrix.</p>
+              <p className={`text-xs sm:text-sm ${theme.textMuted}`}>Request an analysis to determine your highest priority task based on the Eisenhower matrix.</p>
             )}
           </div>
-          <button onClick={handleWhatNext} disabled={isAskingNext} className={`flex-shrink-0 flex items-center gap-2 border px-5 py-2.5 rounded-lg font-medium transition-all disabled:opacity-50 text-sm ${isDarkMode ? 'bg-blue-600/20 hover:bg-blue-600/30 border-blue-500/50 text-blue-400' : 'bg-blue-50 hover:bg-blue-100 border-blue-200 text-blue-700 shadow-sm'}`}>
+          <button onClick={handleWhatNext} disabled={isAskingNext} className={`w-full md:w-auto flex-shrink-0 flex items-center justify-center gap-2 border px-5 py-3 md:py-2.5 rounded-lg font-medium transition-all disabled:opacity-50 text-sm shadow-sm ${isDarkMode ? 'bg-blue-600/20 hover:bg-blue-600/30 border-blue-500/50 text-blue-400' : 'bg-blue-50 hover:bg-blue-100 border-blue-200 text-blue-700'}`}>
             {isAskingNext ? <Wand2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
             {isAskingNext ? 'Analyzing...' : 'What should I do next?'}
           </button>
         </div>
 
-        <div className={`mb-8 border p-5 rounded-xl transition-colors duration-300 ${theme.card}`}>
-          <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
-            <div className="flex-1">
+        <div className={`mb-6 sm:mb-8 border p-4 sm:p-5 rounded-xl transition-colors duration-300 ${theme.card}`}>
+          <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-5 sm:gap-6">
+            <div className="flex-1 w-full">
               <div className="flex items-center gap-2 mb-2">
                 <Activity className="w-4 h-4 text-purple-500" />
-                <h2 className={`text-sm font-semibold uppercase tracking-wider ${theme.textMuted}`}>Flow State Engine (Pomodoro)</h2>
+                <h2 className={`text-xs sm:text-sm font-semibold uppercase tracking-wider ${theme.textMuted}`}>Flow State Engine (Pomodoro)</h2>
               </div>
               {activeFocusTask ? (
                 <div>
-                  <p className={`font-semibold text-sm ${theme.textMain}`}>Focusing on: <span className="text-purple-500">{activeFocusTask.title}</span></p>
-                  <p className={`text-xs mt-1 uppercase tracking-wider font-extrabold text-purple-400`}>Mode: {focusMode === 'work' ? 'Deep Work Cycle' : 'System Restoration Break'}</p>
+                  <p className={`font-semibold text-sm ${theme.textMain} break-words`}>Focusing on: <span className="text-purple-500">{activeFocusTask.title}</span></p>
+                  <p className={`text-[10px] sm:text-xs mt-1 uppercase tracking-wider font-extrabold text-purple-400`}>Mode: {focusMode === 'work' ? 'Deep Work Cycle' : 'System Restoration Break'}</p>
                 </div>
               ) : (
-                <p className={`text-sm ${theme.textMuted}`}>Select the target focal action icon on any task inside your matrix to launch a structured flow state interval.</p>
+                <p className={`text-xs sm:text-sm ${theme.textMuted}`}>Select the target focal action icon on any task inside your matrix to launch a structured flow state interval.</p>
               )}
             </div>
 
-            <div className="flex items-center gap-6 flex-shrink-0 w-full lg:w-auto justify-between lg:justify-end">
+            <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-6 w-full lg:w-auto justify-between lg:justify-end border-t border-slate-200 dark:border-slate-700 lg:border-t-0 pt-4 lg:pt-0 mt-2 lg:mt-0">
               <div className="flex flex-col items-center">
-                <span className="font-mono text-3xl font-black tracking-widest text-purple-500">
+                <span className="font-mono text-4xl sm:text-3xl font-black tracking-widest text-purple-500">
                   {Math.floor(focusTimeLeft / 60).toString().padStart(2, '0')}:{(focusTimeLeft % 60).toString().padStart(2, '0')}
                 </span>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center justify-center gap-2 w-full sm:w-auto">
                 {activeFocusTask && (
                   <>
-                    <button onClick={() => setIsFocusActive(!isFocusActive)} className={`p-3 rounded-xl text-white transition-all shadow-sm ${isFocusActive ? 'bg-amber-600 hover:bg-amber-700' : 'bg-purple-600 hover:bg-purple-700'}`} title={isFocusActive ? "Pause Focus" : "Start Focus"}>{isFocusActive ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}</button>
-                    <button onClick={() => { setFocusTimeLeft(focusMode === 'work' ? 25 * 60 : 5 * 60); setIsFocusActive(false); }} className={`p-3 rounded-xl border transition-colors ${isDarkMode ? 'bg-slate-900/50 border-slate-700 text-slate-300 hover:bg-slate-800' : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50 shadow-sm'}`} title="Reset Timer"><RotateCcw className="w-4 h-4" /></button>
-                    <button onClick={() => { setActiveFocusTask(null); setIsFocusActive(false); setFocusTimeLeft(25 * 60); setFocusMode('work'); }} className={`px-3 py-3 rounded-xl text-xs font-bold border transition-colors ${isDarkMode ? 'hover:bg-red-500/10 text-red-400 border-red-500/20' : 'hover:bg-red-50 text-red-600 border-red-200 bg-white shadow-sm'}`}>Cancel Focus</button>
+                    <button onClick={() => setIsFocusActive(!isFocusActive)} className={`flex-1 sm:flex-none p-3 sm:p-3 flex justify-center rounded-xl text-white transition-all shadow-sm ${isFocusActive ? 'bg-amber-600 hover:bg-amber-700' : 'bg-purple-600 hover:bg-purple-700'}`} title={isFocusActive ? "Pause Focus" : "Start Focus"}>{isFocusActive ? <Pause className="w-5 h-5 sm:w-4 sm:h-4" /> : <Play className="w-5 h-5 sm:w-4 sm:h-4" />}</button>
+                    <button onClick={() => { setFocusTimeLeft(focusMode === 'work' ? 25 * 60 : 5 * 60); setIsFocusActive(false); }} className={`flex-1 sm:flex-none p-3 sm:p-3 flex justify-center rounded-xl border transition-colors shadow-sm ${isDarkMode ? 'bg-slate-900/50 border-slate-700 text-slate-300 hover:bg-slate-800' : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'}`} title="Reset Timer"><RotateCcw className="w-5 h-5 sm:w-4 sm:h-4" /></button>
+                    <button onClick={() => { setActiveFocusTask(null); setIsFocusActive(false); setFocusTimeLeft(25 * 60); setFocusMode('work'); }} className={`flex-[2] sm:flex-none px-4 py-3 sm:py-3 rounded-xl text-xs font-bold border transition-colors shadow-sm text-center ${isDarkMode ? 'hover:bg-red-500/10 text-red-400 border-red-500/20' : 'hover:bg-red-50 text-red-600 border-red-200 bg-white'}`}>Cancel</button>
                   </>
                 )}
               </div>
@@ -897,14 +875,14 @@ export default function App() {
           </div>
         </div>
 
-        <section className={`rounded-xl border p-6 mb-10 transition-colors duration-300 ${theme.card}`}>
-          <div className="flex items-center justify-between mb-6 border-b border-slate-200 dark:border-slate-700 pb-4">
+        <section className={`rounded-xl border p-4 sm:p-6 mb-8 sm:mb-10 transition-colors duration-300 ${theme.card}`}>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5 sm:mb-6 border-b border-slate-200 dark:border-slate-700 pb-4">
             <h2 className={`text-sm font-semibold uppercase tracking-wider flex items-center gap-2 ${theme.textMuted}`}>
               <Plus className="w-4 h-4" /> Add Tasks
             </h2>
-            <div className={`flex p-1 rounded-lg ${isDarkMode ? 'bg-slate-800' : 'bg-slate-200'}`}>
-              <button onClick={() => setInputMode('manual')} className={`px-4 py-1.5 text-xs font-medium rounded-md transition-colors ${inputMode === 'manual' ? (isDarkMode ? 'bg-slate-700 text-white' : 'bg-white text-slate-800 shadow-sm') : `${theme.textMuted} hover:text-current`}`}>Manual Input</button>
-              <button onClick={() => setInputMode('ai')} className={`px-4 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1 ${inputMode === 'ai' ? (isDarkMode ? 'bg-blue-600/30 text-blue-400' : 'bg-white text-blue-700 shadow-sm') : `${theme.textMuted} hover:text-current`}`}><Sparkles className="w-3 h-3" /> Automatic Input</button>
+            <div className={`flex p-1 rounded-lg w-full sm:w-auto ${isDarkMode ? 'bg-slate-800' : 'bg-slate-200'}`}>
+              <button onClick={() => setInputMode('manual')} className={`flex-1 sm:flex-none px-4 py-2 sm:py-1.5 text-xs font-medium rounded-md transition-colors ${inputMode === 'manual' ? (isDarkMode ? 'bg-slate-700 text-white' : 'bg-white text-slate-800 shadow-sm') : `${theme.textMuted} hover:text-current`}`}>Manual Input</button>
+              <button onClick={() => setInputMode('ai')} className={`flex-1 sm:flex-none px-4 py-2 sm:py-1.5 text-xs font-medium rounded-md transition-colors flex items-center justify-center gap-1 ${inputMode === 'ai' ? (isDarkMode ? 'bg-blue-600/30 text-blue-400' : 'bg-white text-blue-700 shadow-sm') : `${theme.textMuted} hover:text-current`}`}><Sparkles className="w-3 h-3" /> Automatic</button>
             </div>
           </div>
 
@@ -914,29 +892,31 @@ export default function App() {
                 <label className={`text-xs font-bold uppercase tracking-wider ${theme.textMuted}`}>Task Description</label>
                 <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g., Finalize the Q3 financial presentation..." className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all text-sm ${theme.input}`} required />
               </div>
-              <div className="flex flex-col md:flex-row items-end gap-4">
-                <div className="flex flex-col gap-1.5 w-full md:w-auto flex-1">
+              
+              {/* --- BULLETPROOF RESPONSIVE MANUAL INPUT SECTION --- */}
+              <div className="flex flex-col sm:flex-row items-end gap-4 w-full">
+                <div className="flex flex-col gap-1.5 w-full sm:flex-1">
                   <label className={`text-xs font-bold uppercase tracking-wider ${theme.textMuted}`}>Deadline <span className="opacity-60">(Optional)</span></label>
-                  <input type="datetime-local" value={deadline} onChange={(e) => setDeadline(e.target.value)} className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-sm transition-all ${theme.input}`} style={{ colorScheme: isDarkMode ? 'dark' : 'light' }} />
+                  <input type="datetime-local" value={deadline} onChange={(e) => setDeadline(e.target.value)} className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-sm transition-all h-[46px] ${theme.input}`} style={{ colorScheme: isDarkMode ? 'dark' : 'light' }} />
                 </div>
-                <div className="flex flex-col gap-1.5 w-full md:w-auto">
+                <div className="flex flex-col gap-1.5 w-full sm:w-auto sm:min-w-[140px]">
                   <label className={`text-xs font-bold uppercase tracking-wider ${theme.textMuted}`}>Priority <span className="opacity-60">(Optional)</span></label>
-                  <label className={`flex items-center justify-center gap-2 cursor-pointer border px-4 py-3 rounded-lg transition-colors select-none group h-[46px] ${isDarkMode ? 'bg-slate-900/50 border-slate-700 hover:bg-slate-800' : 'bg-white border-slate-300 hover:bg-slate-50'}`}>
+                  <label className={`flex items-center justify-center gap-2 cursor-pointer border px-4 py-3 rounded-lg transition-colors select-none group h-[46px] w-full ${isDarkMode ? 'bg-slate-900/50 border-slate-700 hover:bg-slate-800' : 'bg-white border-slate-300 hover:bg-slate-50'}`}>
                     <input type="checkbox" checked={isImportant} onChange={(e) => setIsImportant(e.target.checked)} className="w-4 h-4 text-blue-600 bg-slate-100 border-slate-300 rounded focus:ring-blue-500" />
                     <span className={`text-sm font-medium ${theme.textMain}`}>High Priority</span>
                   </label>
                 </div>
-                <button type="submit" disabled={!title} className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-lg font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm h-[46px] shadow-sm">Add Task</button>
+                <button type="submit" disabled={!title} className="w-full sm:w-auto sm:min-w-[120px] bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm h-[46px] shadow-sm whitespace-nowrap">Add Task</button>
               </div>
             </form>
           ) : (
             <div className="flex flex-col gap-4">
               <div className="flex flex-col gap-1.5">
                 <label className={`text-xs font-bold uppercase tracking-wider ${theme.textMuted}`}>Task Details (Paragraph)</label>
-                <textarea value={brainDumpText} onChange={(e) => setBrainDumpText(e.target.value)} placeholder="Type or paste a paragraph of what you need to do..." className={`w-full h-24 px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all text-sm resize-none ${theme.input}`} />
+                <textarea value={brainDumpText} onChange={(e) => setBrainDumpText(e.target.value)} placeholder="Type or paste a paragraph of what you need to do..." className={`w-full h-28 sm:h-24 px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all text-sm resize-none ${theme.input}`} />
               </div>
               <div className="flex justify-end">
-                <button onClick={handleBrainDump} disabled={!brainDumpText.trim() || isExtracting} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm shadow-sm">
+                <button onClick={handleBrainDump} disabled={!brainDumpText.trim() || isExtracting} className="w-full sm:w-auto flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 sm:py-2.5 rounded-lg font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm shadow-sm">
                   {isExtracting ? <Wand2 className="w-4 h-4 animate-spin" /> : <Workflow className="w-4 h-4" />}
                   {isExtracting ? 'Extracting Logic...' : 'Process & Sort'}
                 </button>
@@ -945,72 +925,73 @@ export default function App() {
           )}
         </section>
 
+        {/* --- BULLETPROOF RESPONSIVE WARNING BANNER --- */}
         {groupedTasks.Q1.length >= 4 && (
-          <div className="mb-6 flex flex-col md:flex-row items-start md:items-center justify-between p-4 rounded-xl border border-red-500/30 bg-red-500/10 text-red-500 gap-4 animate-fade-in shadow-sm">
-            <div className="flex items-center gap-3">
-              <ShieldAlert className="w-6 h-6 animate-pulse text-red-500" />
-              <div>
-                <h4 className="font-bold text-sm">Cognitive Workload Warning</h4>
-                <p className="text-xs opacity-90">Your Q1 quadrant contains {groupedTasks.Q1.length} tasks. Executive bottleneck warning is active.</p>
+          <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 sm:p-5 rounded-xl border border-red-500/30 bg-red-500/10 text-red-500 gap-4 sm:gap-6 animate-fade-in shadow-sm w-full overflow-hidden">
+            <div className="flex items-start sm:items-center gap-3 w-full sm:w-auto min-w-0">
+              <ShieldAlert className="w-6 h-6 flex-shrink-0 animate-pulse text-red-500 mt-0.5 sm:mt-0" />
+              <div className="flex-1 min-w-0">
+                <h4 className="font-bold text-sm leading-tight">Cognitive Workload Warning</h4>
+                <p className="text-xs opacity-90 mt-1 leading-relaxed">Your Q1 quadrant contains {groupedTasks.Q1.length} tasks. Executive bottleneck warning is active.</p>
               </div>
             </div>
-            <button onClick={handleAITriage} disabled={isTriaging} className="flex-shrink-0 flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-medium px-4 py-2 rounded-lg text-xs transition-colors disabled:opacity-50 shadow-sm">
-              {isTriaging ? <Wand2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+            <button onClick={handleAITriage} disabled={isTriaging} className="w-full sm:w-auto flex-shrink-0 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white font-medium px-5 py-3 sm:py-2.5 rounded-lg text-xs sm:text-sm transition-colors disabled:opacity-50 shadow-sm">
+              {isTriaging ? <Wand2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
               AI Workload Triage
             </button>
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 sm:gap-6">
           
-          <div className={`rounded-xl border p-5 flex flex-col h-[400px] transition-colors duration-300 ${theme.q1}`}>
-            <div className="flex flex-col gap-2 mb-4 border-b border-current pb-3 opacity-80">
-              <div className="flex items-center justify-between">
-                <h3 className={`font-bold text-sm tracking-wide uppercase flex items-center gap-2 ${isDarkMode ? 'text-red-400' : 'text-red-700'}`}><AlertTriangle className="w-4 h-4" /> Do First</h3>
-                <span className={`text-[10px] font-semibold px-2 py-1 rounded uppercase tracking-wider ${isDarkMode ? 'bg-red-950/50 text-red-300' : 'bg-red-200 text-red-900 border border-red-300'}`}>Urgent & Important</span>
+          <div className={`rounded-xl border p-4 sm:p-5 flex flex-col h-[350px] sm:h-[400px] transition-colors duration-300 ${theme.q1}`}>
+            <div className="flex flex-col gap-2 mb-4 border-b border-current pb-3 opacity-80 flex-shrink-0">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className={`font-bold text-sm tracking-wide uppercase flex items-center gap-2 truncate ${isDarkMode ? 'text-red-400' : 'text-red-700'}`}><AlertTriangle className="w-4 h-4 flex-shrink-0" /> <span className="truncate">Do First</span></h3>
+                <span className={`text-[9px] sm:text-[10px] font-semibold px-2 py-1 rounded uppercase tracking-wider flex-shrink-0 whitespace-nowrap ${isDarkMode ? 'bg-red-950/50 text-red-300' : 'bg-red-200 text-red-900 border border-red-300'}`}>Urgent & Important</span>
               </div>
-              <p className="text-[11px] leading-relaxed opacity-90 font-medium">Critical tasks requiring immediate action. Tackle these immediately to prevent crises.</p>
+              <p className="text-[10px] sm:text-[11px] leading-relaxed opacity-90 font-medium line-clamp-2">Critical tasks requiring immediate action. Tackle these immediately to prevent crises.</p>
             </div>
-            <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+            <div className="flex-1 overflow-y-auto pr-1 sm:pr-2 custom-scrollbar min-h-0">
               {groupedTasks.Q1.length === 0 ? <p className={`text-xs text-center mt-10 ${theme.textMuted}`}>No critical tasks.</p> : groupedTasks.Q1.map(task => <TaskItem key={task.id} task={task} />)}
             </div>
           </div>
 
-          <div className={`rounded-xl border p-5 flex flex-col h-[400px] transition-colors duration-300 ${theme.q2}`}>
-            <div className="flex flex-col gap-2 mb-4 border-b border-current pb-3 opacity-80">
-              <div className="flex items-center justify-between">
-                <h3 className={`font-bold text-sm tracking-wide uppercase flex items-center gap-2 ${isDarkMode ? 'text-blue-400' : 'text-blue-700'}`}><Clock className="w-4 h-4" /> Schedule</h3>
-                <span className={`text-[10px] font-semibold px-2 py-1 rounded uppercase tracking-wider ${isDarkMode ? 'bg-blue-950/50 text-blue-300' : 'bg-blue-200 text-blue-900 border border-blue-300'}`}>Important, Not Urgent</span>
+          <div className={`rounded-xl border p-4 sm:p-5 flex flex-col h-[350px] sm:h-[400px] transition-colors duration-300 ${theme.q2}`}>
+            <div className="flex flex-col gap-2 mb-4 border-b border-current pb-3 opacity-80 flex-shrink-0">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className={`font-bold text-sm tracking-wide uppercase flex items-center gap-2 truncate ${isDarkMode ? 'text-blue-400' : 'text-blue-700'}`}><Clock className="w-4 h-4 flex-shrink-0" /> <span className="truncate">Schedule</span></h3>
+                <span className={`text-[9px] sm:text-[10px] font-semibold px-2 py-1 rounded uppercase tracking-wider flex-shrink-0 whitespace-nowrap ${isDarkMode ? 'bg-blue-950/50 text-blue-300' : 'bg-blue-200 text-blue-900 border border-blue-300'}`}>Important, Not Urgent</span>
               </div>
-              <p className="text-[11px] leading-relaxed opacity-90 font-medium">Strategic goals and long-term planning. Schedule dedicated time to complete these.</p>
+              <p className="text-[10px] sm:text-[11px] leading-relaxed opacity-90 font-medium line-clamp-2">Strategic goals and long-term planning. Schedule dedicated time to complete these.</p>
             </div>
-            <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+            <div className="flex-1 overflow-y-auto pr-1 sm:pr-2 custom-scrollbar min-h-0">
               {groupedTasks.Q2.length === 0 ? <p className={`text-xs text-center mt-10 ${theme.textMuted}`}>No strategic tasks planned.</p> : groupedTasks.Q2.map(task => <TaskItem key={task.id} task={task} />)}
             </div>
           </div>
 
-          <div className={`rounded-xl border p-5 flex flex-col h-[400px] transition-colors duration-300 ${theme.q3}`}>
-            <div className="flex flex-col gap-2 mb-4 border-b border-current pb-3 opacity-80">
-              <div className="flex items-center justify-between">
-                <h3 className={`font-bold text-sm tracking-wide uppercase flex items-center gap-2 ${isDarkMode ? 'text-amber-400' : 'text-amber-700'}`}><AlertCircle className="w-4 h-4" /> Delegate</h3>
-                <span className={`text-[10px] font-semibold px-2 py-1 rounded uppercase tracking-wider ${isDarkMode ? 'bg-amber-950/50 text-amber-300' : 'bg-amber-200 text-amber-900 border border-amber-300'}`}>Urgent, Not Important</span>
+          <div className={`rounded-xl border p-4 sm:p-5 flex flex-col h-[350px] sm:h-[400px] transition-colors duration-300 ${theme.q3}`}>
+            <div className="flex flex-col gap-2 mb-4 border-b border-current pb-3 opacity-80 flex-shrink-0">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className={`font-bold text-sm tracking-wide uppercase flex items-center gap-2 truncate ${isDarkMode ? 'text-amber-400' : 'text-amber-700'}`}><AlertCircle className="w-4 h-4 flex-shrink-0" /> <span className="truncate">Delegate</span></h3>
+                <span className={`text-[9px] sm:text-[10px] font-semibold px-2 py-1 rounded uppercase tracking-wider flex-shrink-0 whitespace-nowrap ${isDarkMode ? 'bg-amber-950/50 text-amber-300' : 'bg-amber-200 text-amber-900 border border-amber-300'}`}>Urgent, Not Important</span>
               </div>
-              <p className="text-[11px] leading-relaxed opacity-90 font-medium">Time-sensitive distractions. Assign these to someone else or automate if possible.</p>
+              <p className="text-[10px] sm:text-[11px] leading-relaxed opacity-90 font-medium line-clamp-2">Time-sensitive distractions. Assign these to someone else or automate if possible.</p>
             </div>
-            <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+            <div className="flex-1 overflow-y-auto pr-1 sm:pr-2 custom-scrollbar min-h-0">
               {groupedTasks.Q3.length === 0 ? <p className={`text-xs text-center mt-10 ${theme.textMuted}`}>No imminent distractions.</p> : groupedTasks.Q3.map(task => <TaskItem key={task.id} task={task} />)}
             </div>
           </div>
 
-          <div className={`rounded-xl border p-5 flex flex-col h-[400px] transition-colors duration-300 ${theme.q4}`}>
-            <div className="flex flex-col gap-2 mb-4 border-b border-current pb-3 opacity-80">
-              <div className="flex items-center justify-between">
-                <h3 className={`font-bold text-sm tracking-wide uppercase flex items-center gap-2 ${isDarkMode ? 'text-slate-400' : 'text-slate-700'}`}><Trash2 className="w-4 h-4" /> Delete</h3>
-                <span className={`text-[10px] font-semibold px-2 py-1 rounded uppercase tracking-wider ${isDarkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-300 text-slate-800 border border-slate-400'}`}>Not Urgent & Not Important</span>
+          <div className={`rounded-xl border p-4 sm:p-5 flex flex-col h-[350px] sm:h-[400px] transition-colors duration-300 ${theme.q4}`}>
+            <div className="flex flex-col gap-2 mb-4 border-b border-current pb-3 opacity-80 flex-shrink-0">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className={`font-bold text-sm tracking-wide uppercase flex items-center gap-2 truncate ${isDarkMode ? 'text-slate-400' : 'text-slate-700'}`}><Trash2 className="w-4 h-4 flex-shrink-0" /> <span className="truncate">Delete</span></h3>
+                <span className={`text-[9px] sm:text-[10px] font-semibold px-2 py-1 rounded uppercase tracking-wider flex-shrink-0 whitespace-nowrap ${isDarkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-300 text-slate-800 border border-slate-400'}`}>Not Urgent & Not Important</span>
               </div>
-              <p className="text-[11px] leading-relaxed opacity-90 font-medium">Low-value activities. Remove these entirely to protect your focus and time.</p>
+              <p className="text-[10px] sm:text-[11px] leading-relaxed opacity-90 font-medium line-clamp-2">Low-value activities. Remove these entirely to protect your focus and time.</p>
             </div>
-            <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+            <div className="flex-1 overflow-y-auto pr-1 sm:pr-2 custom-scrollbar min-h-0">
               {groupedTasks.Q4.length === 0 ? <p className={`text-xs text-center mt-10 ${theme.textMuted}`}>Clean slate.</p> : groupedTasks.Q4.map(task => <TaskItem key={task.id} task={task} />)}
             </div>
           </div>
@@ -1027,15 +1008,15 @@ export default function App() {
           </button>
 
           {showCompleted && (
-            <div className={`mt-4 p-5 rounded-xl border transition-colors duration-300 ${theme.card}`}>
+            <div className={`mt-4 p-4 sm:p-5 rounded-xl border transition-colors duration-300 ${theme.card}`}>
               <div className="flex flex-col md:flex-row gap-4 mb-6 border-b border-slate-200 dark:border-slate-700 pb-4">
-                <div className="relative flex-1">
+                <div className="relative flex-1 w-full">
                   <Search className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${theme.textMuted}`} />
-                  <input type="text" placeholder="Search past logs by title..." value={archiveSearch} onChange={(e) => setArchiveSearch(e.target.value)} className={`w-full pl-10 pr-4 py-2 rounded-lg border text-xs outline-none focus:ring-2 focus:ring-blue-500 transition-all ${theme.input}`} />
+                  <input type="text" placeholder="Search past logs by title..." value={archiveSearch} onChange={(e) => setArchiveSearch(e.target.value)} className={`w-full pl-10 pr-4 py-3 sm:py-2 rounded-lg border text-xs sm:text-sm outline-none focus:ring-2 focus:ring-blue-500 transition-all ${theme.input}`} />
                 </div>
-                <div className="relative md:w-48">
+                <div className="relative w-full md:w-48">
                   <Calendar className={`absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 ${theme.textMuted}`} />
-                  <input type="date" value={archiveDate} onChange={(e) => setArchiveDate(e.target.value)} className={`w-full pl-10 pr-4 py-2 rounded-lg border text-xs outline-none focus:ring-2 focus:ring-blue-500 transition-all ${theme.input}`} style={{ colorScheme: isDarkMode ? 'dark' : 'light' }} />
+                  <input type="date" value={archiveDate} onChange={(e) => setArchiveDate(e.target.value)} className={`w-full pl-10 pr-4 py-3 sm:py-2 rounded-lg border text-xs sm:text-sm outline-none focus:ring-2 focus:ring-blue-500 transition-all ${theme.input}`} style={{ colorScheme: isDarkMode ? 'dark' : 'light' }} />
                 </div>
               </div>
 
@@ -1052,11 +1033,11 @@ export default function App() {
       </main>
 
       <style>{`
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar { width: 5px; height: 5px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background-color: rgba(128,128,128,0.3); border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background-color: rgba(128,128,128,0.3); border-radius: 10px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background-color: rgba(59, 130, 246, 0.8); }
-        @keyframes fade-in { from { opacity: 0; transform: translate(-50%, -10px); } to { opacity: 1; transform: translate(-50%, 0); } }
+        @keyframes fade-in { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
         .animate-fade-in { animation: fade-in 0.3s ease-out forwards; }
       `}</style>
     </div>
