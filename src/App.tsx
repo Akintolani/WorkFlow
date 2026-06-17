@@ -181,6 +181,7 @@ export default function App() {
   // Assistant Voice State
   const [assistantVoice, setAssistantVoice] = useState<string>('susan');
   const [showLandingPage, setShowLandingPage] = useState<boolean>(true);
+  const [prefsLoaded, setPrefsLoaded] = useState<boolean>(false);
 
   const notifiedTasksRef = useRef<Set<string>>(new Set());
   const hasAnnouncedOverloadRef = useRef<boolean>(false);
@@ -190,6 +191,53 @@ export default function App() {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
   };
+
+  // --- Preference Synchronization Handlers ---
+  const handleToggleTheme = async () => {
+    const newMode = !isDarkMode;
+    setIsDarkMode(newMode);
+    if (user && !user.isAnonymous) {
+      try {
+        const prefRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'preferences');
+        await setDoc(prefRef, { isDarkMode: newMode }, { merge: true });
+      } catch (e) {
+        console.error("Failed to sync theme", e);
+      }
+    }
+  };
+
+  const handleChangeVoice = async (newVoice: string) => {
+    setAssistantVoice(newVoice);
+    if (user && !user.isAnonymous) {
+      try {
+        const prefRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'preferences');
+        await setDoc(prefRef, { assistantVoice: newVoice }, { merge: true });
+      } catch (e) {
+        console.error("Failed to sync voice", e);
+      }
+    }
+  };
+
+  // Fetch Settings on Login
+  useEffect(() => {
+    if (!user || user.isAnonymous) {
+      setPrefsLoaded(true);
+      return;
+    }
+    const prefRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'preferences');
+    const unsubscribe = onSnapshot(prefRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.isDarkMode !== undefined) setIsDarkMode(data.isDarkMode);
+        if (data.assistantVoice !== undefined) setAssistantVoice(data.assistantVoice);
+      }
+      setPrefsLoaded(true);
+    }, (error) => {
+      console.error("Failed to fetch preferences:", error);
+      setPrefsLoaded(true);
+    });
+    return () => unsubscribe();
+  }, [user]);
 
   // --- Speech Synthesis Router ---
   const speakAnnouncement = (text: string, voiceAlias: string, onEndCallback?: () => void) => {
@@ -236,18 +284,30 @@ export default function App() {
     }
   }, []);
 
-  // Trigger Welcome Voice Once Per Session
+  // Trigger Welcome Voice Once Per Session (Only after prefs are loaded)
   useEffect(() => {
-    if (user && !user.isAnonymous && !isAuthLoading && !hasWelcomedRef.current && !showLandingPage) {
+    if (user && !user.isAnonymous && !isAuthLoading && prefsLoaded && !hasWelcomedRef.current && !showLandingPage) {
       hasWelcomedRef.current = true;
       setTimeout(() => {
         const name = assistantVoice.charAt(0).toUpperCase() + assistantVoice.slice(1);
         speakAnnouncement(`Welcome to work flow, Your work assistant, I am ${name} and I will be your personal assistant.`, assistantVoice);
       }, 1500);
     }
-  }, [user, isAuthLoading, showLandingPage, assistantVoice]);
+  }, [user, isAuthLoading, showLandingPage, assistantVoice, prefsLoaded]);
 
   useEffect(() => {
+    // --- Set Tab Title and Favicon ---
+    document.title = "Work Flow";
+    let link = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
+    if (!link) {
+      link = document.createElement('link');
+      link.rel = 'icon';
+      document.head.appendChild(link);
+    }
+    // Encoded SVG of the Workflow Icon for the browser tab
+    link.href = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='3' width='6' height='6' rx='1'></rect><rect x='15' y='15' width='6' height='6' rx='1'></rect><path d='M9 6h4a2 2 0 0 1 2 2v6'></path></svg>";
+    // ---------------------------------
+
     const script = document.createElement('script');
     script.src = 'https://cdn.tailwindcss.com';
     document.head.appendChild(script);
@@ -303,7 +363,7 @@ export default function App() {
         const diffMinutes = Math.round((taskTime - nowTime) / (1000 * 60));
         
         if (diffMinutes < 0 && task.quadrant === 'Q2' && user) {
-          const taskRef = doc(db, 'users', user.uid, 'tasks', task.id);
+          const taskRef = doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', task.id);
           await updateDoc(taskRef, { quadrant: 'Q1' });
           showToast(`Escalation: "${task.title}" running past timeline; moved to Q1 Crisis`, 'error');
         }
@@ -377,17 +437,21 @@ export default function App() {
     } catch (e: any) { setAuthError(e.message.replace('Firebase: ', '')); }
   };
 
-  const handleSignOut = async () => await signOut(auth);
+  const handleSignOut = async () => {
+    hasWelcomedRef.current = false;
+    await signOut(auth);
+  };
 
+  // Data Fetching Sync
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
-    if (!user) return;
+    if (!user || user.isAnonymous) return;
     setSyncing(true);
-    const q = query(collection(db, 'users', user.uid, 'tasks'));
+    const q = query(collection(db, 'artifacts', appId, 'users', user.uid, 'tasks'));
 
     const unsubscribe = onSnapshot(q, 
       (snapshot) => {
@@ -424,7 +488,7 @@ export default function App() {
 
   const saveTaskToDb = async (taskData: { title: string; deadline: string; isImportant: boolean }) => {
     if (!user) return;
-    const taskRef = doc(collection(db, 'users', user.uid, 'tasks'));
+    const taskRef = doc(collection(db, 'artifacts', appId, 'users', user.uid, 'tasks'));
     await setDoc(taskRef, {
       id: taskRef.id,
       ...taskData,
@@ -451,7 +515,7 @@ export default function App() {
   const toggleTaskStatus = async (task: Task) => {
     if (!user) return;
     const isNowCompleted = task.status !== 'completed';
-    await updateDoc(doc(db, 'users', user.uid, 'tasks', task.id), { 
+    await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', task.id), { 
       status: isNowCompleted ? 'completed' : 'pending',
       completedAt: isNowCompleted ? new Date().toISOString() : null
     });
@@ -460,13 +524,13 @@ export default function App() {
 
   const handleDeleteTask = async (taskId: string) => {
     if (!user) return;
-    await deleteDoc(doc(db, 'users', user.uid, 'tasks', taskId));
+    await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', taskId));
     showToast('Task removed', 'info');
   };
 
   const updateTaskQuadrant = async (task: Task, newQuadrant: string) => {
     if (!user || task.quadrant === newQuadrant) return;
-    await updateDoc(doc(db, 'users', user.uid, 'tasks', task.id), { quadrant: newQuadrant });
+    await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', task.id), { quadrant: newQuadrant });
     showToast(`Task moved to ${newQuadrant}`, 'success');
   };
 
@@ -502,7 +566,7 @@ export default function App() {
         for (const sub of result.subtasks) {
           await saveTaskToDb({ title: `[Step] ${sub.title}`, deadline: sub.deadline ? sub.deadline.slice(0, 16) : '', isImportant: task.isImportant });
         }
-        await deleteDoc(doc(db, 'users', user.uid, 'tasks', task.id));
+        await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', task.id));
         showToast(`Task successfully decomposed into ${result.subtasks.length} actionable steps.`, 'success');
       } else {
         showToast('AI could not decompose this task further.', 'info');
@@ -602,7 +666,7 @@ export default function App() {
       for (const [taskId, newQuad] of Object.entries(manualTriageSelections)) {
         const task = tasks.find(t => t.id === taskId);
         if (task && task.quadrant !== newQuad) {
-          await updateDoc(doc(db, 'users', user.uid, 'tasks', taskId), { quadrant: newQuad });
+          await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', taskId), { quadrant: newQuad });
           updatedCount++;
         }
       }
@@ -812,7 +876,7 @@ export default function App() {
           </div>
           
           <div className="mt-8 flex items-center gap-4">
-            <button onClick={() => setIsDarkMode(!isDarkMode)} className={`p-3 rounded-full transition-all ${isDarkMode ? 'bg-slate-800 text-amber-400 hover:bg-slate-700 shadow-lg border border-slate-700' : 'bg-white text-indigo-600 hover:bg-slate-50 shadow-lg border border-slate-200'}`} title="Toggle Theme">
+            <button onClick={handleToggleTheme} className={`p-3 rounded-full transition-all ${isDarkMode ? 'bg-slate-800 text-amber-400 hover:bg-slate-700 shadow-lg border border-slate-700' : 'bg-white text-indigo-600 hover:bg-slate-50 shadow-lg border border-slate-200'}`} title="Toggle Theme">
               {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
             </button>
           </div>
@@ -872,7 +936,7 @@ export default function App() {
           </div>
         </div>
         <div className="mt-8 flex items-center gap-4">
-          <button onClick={() => setIsDarkMode(!isDarkMode)} className={`p-2 rounded-md transition-all ${isDarkMode ? 'hover:bg-slate-800 text-amber-400' : 'hover:bg-slate-300 text-indigo-600'}`} title="Toggle Theme">{isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}</button>
+          <button onClick={handleToggleTheme} className={`p-2 rounded-md transition-all ${isDarkMode ? 'hover:bg-slate-800 text-amber-400' : 'hover:bg-slate-300 text-indigo-600'}`} title="Toggle Theme">{isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}</button>
         </div>
       </div>
     );
@@ -1017,7 +1081,7 @@ export default function App() {
               <select 
                 value={assistantVoice}
                 onChange={(e) => {
-                  setAssistantVoice(e.target.value);
+                  handleChangeVoice(e.target.value);
                   speakAnnouncement(`Hello, my name is ${e.target.options[e.target.selectedIndex].text}. I am your work assistant.`, e.target.value);
                 }}
                 className={`bg-transparent text-xs font-semibold tracking-wide outline-none cursor-pointer appearance-none ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}
@@ -1031,7 +1095,7 @@ export default function App() {
               </select>
             </div>
 
-            <button onClick={() => setIsDarkMode(!isDarkMode)} className={`flex-shrink-0 p-2 rounded-md transition-all ${isDarkMode ? 'hover:bg-slate-800 text-amber-400' : 'hover:bg-white text-indigo-600 shadow-sm'}`} title="Toggle Theme">
+            <button onClick={handleToggleTheme} className={`flex-shrink-0 p-2 rounded-md transition-all ${isDarkMode ? 'hover:bg-slate-800 text-amber-400' : 'hover:bg-white text-indigo-600 shadow-sm'}`} title="Toggle Theme">
               {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
             </button>
             
