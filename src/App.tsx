@@ -9,7 +9,8 @@ import {
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
   getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged,
-  GoogleAuthProvider, signInWithPopup, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, User
+  GoogleAuthProvider, signInWithPopup, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, User,
+  setPersistence, browserLocalPersistence
 } from 'firebase/auth';
 import { 
   getFirestore, collection, doc, setDoc, deleteDoc, updateDoc, 
@@ -326,17 +327,12 @@ export default function App() {
       Notification.requestPermission().then(setNotificationPermission);
     }
 
-    let isMounted = true;
     const isCanvasEnv = typeof window !== 'undefined' && (window as any).__app_id;
     
-    const initializeAuth = async () => {
-      // 1. Await Firebase's internal restoration of the session from the browser's IndexedDB. 
-      // This strictly prevents the app from rendering the login screen if an active session exists.
-      await auth.authStateReady(); 
-      
-      // 2. Only inject a temporary session if the app is strictly inside the Canvas editor 
-      // and NO email session was found. On Vercel, this is bypassed.
-      if (isCanvasEnv && !auth.currentUser) {
+    // Listen directly to auth state. Firebase manages indexedDB resolution under the hood.
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (!currentUser && isCanvasEnv) {
+        // Fallback for Canvas editor environment ONLY
         const initialToken = (window as any).__initial_auth_token;
         if (initialToken) {
           try { await signInWithCustomToken(auth, initialToken); } 
@@ -344,21 +340,14 @@ export default function App() {
         } else {
           await signInAnonymously(auth);
         }
+      } else {
+        // Deployed environment handles state directly
+        setUser(currentUser);
+        setIsAuthLoading(false);
       }
-
-      // 3. Unblock the loading screen.
-      if (isMounted) setIsAuthLoading(false);
-    };
-
-    initializeAuth();
-
-    // 4. Standard state listener syncs React state dynamically.
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      if (isMounted) setUser(currentUser);
     });
 
     return () => {
-      isMounted = false;
       unsubscribe();
       if (document.head.contains(script)) document.head.removeChild(script);
     };
@@ -448,7 +437,11 @@ export default function App() {
   }, [isFocusActive, focusTimeLeft, focusMode, assistantVoice]);
 
   const handleGoogleAuth = async () => {
-    try { setAuthError(''); await signInWithPopup(auth, new GoogleAuthProvider()); } 
+    try { 
+      setAuthError(''); 
+      await setPersistence(auth, browserLocalPersistence); // FORCE PHYSICAL SAVE
+      await signInWithPopup(auth, new GoogleAuthProvider()); 
+    } 
     catch (e: any) { setAuthError(e.message.replace('Firebase: ', '')); }
   };
 
@@ -456,6 +449,7 @@ export default function App() {
     e.preventDefault();
     try {
       setAuthError('');
+      await setPersistence(auth, browserLocalPersistence); // FORCE PHYSICAL SAVE
       if (isSignUp) await createUserWithEmailAndPassword(auth, authEmail, authPassword);
       else await signInWithEmailAndPassword(auth, authEmail, authPassword);
     } catch (e: any) { setAuthError(e.message.replace('Firebase: ', '')); }
@@ -465,9 +459,12 @@ export default function App() {
     hasWelcomedRef.current = false;
     setAuthEmail('');
     setAuthPassword('');
+    // Instant UI Drop to resolve any hanging delays
+    setUser(null); 
+    setShowLandingPage(true);
+    
     try {
       await signOut(auth);
-      setShowLandingPage(true);
     } catch (e) {
       console.error("Sign Out Error:", e);
     }
