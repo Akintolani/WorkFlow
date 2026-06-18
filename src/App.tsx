@@ -131,6 +131,14 @@ const playAlarmFor30Seconds = () => {
   }
 };
 
+// --- Desktop Notification Helper (Suppresses Mobile) ---
+const triggerDesktopNotification = (title: string, body: string) => {
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth <= 768;
+  if (!isMobile && 'Notification' in window && Notification.permission === 'granted') {
+    new Notification(title, { body, requireInteraction: true }); // requireInteraction overrides Do Not Disturb gracefully on desktop
+  }
+};
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
@@ -187,6 +195,9 @@ export default function App() {
   const hasAnnouncedOverloadRef = useRef<boolean>(false);
   const hasWelcomedRef = useRef<boolean>(false);
 
+  // Guest detection: ensures the user has permanently signed in with an email/Google
+  const isGuest = !user || user.isAnonymous || user.providerData.length === 0;
+
   const showToast = (message: string, type: string = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
@@ -196,7 +207,7 @@ export default function App() {
   const handleToggleTheme = async () => {
     const newMode = !isDarkMode;
     setIsDarkMode(newMode);
-    if (user && !user.isAnonymous) {
+    if (!isGuest) {
       try {
         const prefRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'preferences');
         await setDoc(prefRef, { isDarkMode: newMode }, { merge: true });
@@ -208,7 +219,7 @@ export default function App() {
 
   const handleChangeVoice = async (newVoice: string) => {
     setAssistantVoice(newVoice);
-    if (user && !user.isAnonymous) {
+    if (!isGuest) {
       try {
         const prefRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'preferences');
         await setDoc(prefRef, { assistantVoice: newVoice }, { merge: true });
@@ -220,7 +231,7 @@ export default function App() {
 
   // Fetch Settings on Login
   useEffect(() => {
-    if (!user || user.isAnonymous) {
+    if (isGuest) {
       setPrefsLoaded(true);
       return;
     }
@@ -237,7 +248,7 @@ export default function App() {
       setPrefsLoaded(true);
     });
     return () => unsubscribe();
-  }, [user]);
+  }, [user, isGuest]);
 
   // --- Speech Synthesis Router ---
   const speakAnnouncement = (text: string, voiceAlias: string, onEndCallback?: () => void) => {
@@ -266,10 +277,10 @@ export default function App() {
         selectedVoice = enVoices.find(v => v.name.includes('Victoria') || v.name.includes('Karen') || (v.lang === 'en-GB' && v.name.includes('Female'))) || enVoices[2 % enVoices.length];
       } else if (voiceAlias === 'jason') {
         selectedVoice = enVoices.find(v => v.name.includes('Arthur') || v.name.includes('Mark') || (v.lang === 'en-US' && v.name.includes('Male'))) || enVoices[3 % enVoices.length];
-      } else if (voiceAlias === 'lola') {
-        selectedVoice = enVoices.find(v => v.lang === 'en-NG' && v.name.includes('Female')) || enVoices.find(v => v.lang.includes('NG')) || enVoices.find(v => v.lang === 'en-ZA' && v.name.includes('Female')) || enVoices[4 % enVoices.length];
-      } else if (voiceAlias === 'tunde') {
-        selectedVoice = enVoices.find(v => v.lang === 'en-NG' && v.name.includes('Male')) || enVoices.find(v => v.lang.includes('NG') && v.name.includes('Male')) || enVoices.find(v => v.lang === 'en-ZA' && v.name.includes('Male')) || enVoices[5 % enVoices.length];
+      } else if (voiceAlias === 'davis') {
+        selectedVoice = enVoices.find(v => v.name.includes('Thomas') || v.name.includes('Evan') || v.name.includes('Fred') || (v.lang === 'en-US' && v.name.includes('Male'))) || enVoices[4 % enVoices.length];
+      } else if (voiceAlias === 'raymond') {
+        selectedVoice = enVoices.find(v => v.name.includes('Oliver') || v.name.includes('Nathan') || v.name.includes('Gordon') || (v.lang === 'en-GB' && v.name.includes('Male'))) || enVoices[5 % enVoices.length];
       }
       if (selectedVoice) utterance.voice = selectedVoice;
     }
@@ -286,14 +297,14 @@ export default function App() {
 
   // Trigger Welcome Voice Once Per Session (Only after prefs are loaded)
   useEffect(() => {
-    if (user && !user.isAnonymous && !isAuthLoading && prefsLoaded && !hasWelcomedRef.current && !showLandingPage) {
+    if (!isGuest && !isAuthLoading && prefsLoaded && !hasWelcomedRef.current && !showLandingPage) {
       hasWelcomedRef.current = true;
       setTimeout(() => {
         const name = assistantVoice.charAt(0).toUpperCase() + assistantVoice.slice(1);
         speakAnnouncement(`Welcome to work flow, Your work assistant, I am ${name} and I will be your personal assistant.`, assistantVoice);
       }, 1500);
     }
-  }, [user, isAuthLoading, showLandingPage, assistantVoice, prefsLoaded]);
+  }, [isGuest, isAuthLoading, showLandingPage, assistantVoice, prefsLoaded]);
 
   useEffect(() => {
     // --- Set Tab Title and Favicon ---
@@ -306,7 +317,6 @@ export default function App() {
     }
     // Encoded SVG of the Workflow Icon for the browser tab
     link.href = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='3' width='6' height='6' rx='1'></rect><rect x='15' y='15' width='6' height='6' rx='1'></rect><path d='M9 6h4a2 2 0 0 1 2 2v6'></path></svg>";
-    // ---------------------------------
 
     const script = document.createElement('script');
     script.src = 'https://cdn.tailwindcss.com';
@@ -316,14 +326,22 @@ export default function App() {
       Notification.requestPermission().then(setNotificationPermission);
     }
 
-    const initAuth = async () => {
-      const initialToken = typeof window !== 'undefined' ? (window as any).__initial_auth_token : undefined;
-      if (initialToken) {
-        try { await signInWithCustomToken(auth, initialToken); } 
-        catch (error) { console.error("Custom token auth failed:", error); }
-      }
+    // Advanced Initial Auth Resolution: Waits for Firebase to properly check if an Email session is already saved in the browser.
+    const initializeAuth = async () => {
+       await auth.authStateReady(); // Wait for IndexedDB session restore
+       
+       if (!auth.currentUser) {
+         // User is completely logged out. Inject the guest session so security rules pass on the landing page.
+         const initialToken = typeof window !== 'undefined' ? (window as any).__initial_auth_token : undefined;
+         if (initialToken) {
+           try { await signInWithCustomToken(auth, initialToken); } 
+           catch (error) { await signInAnonymously(auth); }
+         } else {
+           await signInAnonymously(auth);
+         }
+       }
     };
-    initAuth();
+    initializeAuth();
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
@@ -362,7 +380,7 @@ export default function App() {
         const taskTime = new Date(task.deadline).getTime();
         const diffMinutes = Math.round((taskTime - nowTime) / (1000 * 60));
         
-        if (diffMinutes < 0 && task.quadrant === 'Q2' && user) {
+        if (diffMinutes < 0 && task.quadrant === 'Q2' && !isGuest) {
           const taskRef = doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', task.id);
           await updateDoc(taskRef, { quadrant: 'Q1' });
           showToast(`Escalation: "${task.title}" running past timeline; moved to Q1 Crisis`, 'error');
@@ -379,18 +397,14 @@ export default function App() {
               setNudgeMessage(msgText);
               setTimeout(() => setNudgeMessage(null), 10000); 
 
-              if ('Notification' in window && Notification.permission === 'granted') {
-                new Notification('WorkFlow Alert', { body: msgText, requireInteraction: true });
-              }
+              triggerDesktopNotification('WorkFlow Alert', msgText);
               speakAnnouncement(`It is time for your task: ${task.title}.`, assistantVoice, playAlarmFor30Seconds);
             } else {
               const msgText = `Upcoming in ${diffMinutes} mins: ${task.title}`;
               setNudgeMessage(msgText);
               setTimeout(() => setNudgeMessage(null), 10000); 
 
-              if ('Notification' in window && Notification.permission === 'granted') {
-                new Notification('WorkFlow Alert', { body: msgText, requireInteraction: true });
-              }
+              triggerDesktopNotification('WorkFlow Alert', msgText);
               speakAnnouncement(`The time is ${currentTimeString}, you have ${task.title} in ${diffMinutes} minutes.`, assistantVoice);
             }
           }
@@ -400,7 +414,7 @@ export default function App() {
     const intervalId = setInterval(checkNudgesAndEscalations, 30000);
     checkNudgesAndEscalations(); 
     return () => clearInterval(intervalId);
-  }, [tasks, assistantVoice]);
+  }, [tasks, assistantVoice, isGuest, user]);
 
   useEffect(() => {
     let interval: any = null;
@@ -439,18 +453,22 @@ export default function App() {
 
   const handleSignOut = async () => {
     hasWelcomedRef.current = false;
+    setAuthEmail('');
+    setAuthPassword('');
     await signOut(auth);
+    setShowLandingPage(true);
   };
 
-  // Data Fetching Sync
+  // Data Fetching Sync Using Explicit UID (Guarantees Global Sync for Email Users without hitting security rule blocks)
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
-    if (!user || user.isAnonymous) return;
+    if (isGuest) return;
     setSyncing(true);
+    
     const q = query(collection(db, 'artifacts', appId, 'users', user.uid, 'tasks'));
 
     const unsubscribe = onSnapshot(q, 
@@ -472,7 +490,7 @@ export default function App() {
       window.removeEventListener('offline', handleOffline);
       unsubscribe();
     };
-  }, [user]);
+  }, [isGuest, user]);
 
   const calculateQuadrant = (taskDeadline: string, taskIsImportant: boolean): string => {
     let isUrgent = false;
@@ -487,7 +505,7 @@ export default function App() {
   };
 
   const saveTaskToDb = async (taskData: { title: string; deadline: string; isImportant: boolean }) => {
-    if (!user) return;
+    if (isGuest) return;
     const taskRef = doc(collection(db, 'artifacts', appId, 'users', user.uid, 'tasks'));
     await setDoc(taskRef, {
       id: taskRef.id,
@@ -500,7 +518,7 @@ export default function App() {
 
   const handleManualAddTask = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title || !user) return;
+    if (!title || isGuest) return;
     const taskData = { title, deadline, isImportant };
     setTitle(''); setDeadline(''); setIsImportant(false);
 
@@ -513,7 +531,7 @@ export default function App() {
   };
 
   const toggleTaskStatus = async (task: Task) => {
-    if (!user) return;
+    if (isGuest) return;
     const isNowCompleted = task.status !== 'completed';
     await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', task.id), { 
       status: isNowCompleted ? 'completed' : 'pending',
@@ -523,19 +541,19 @@ export default function App() {
   };
 
   const handleDeleteTask = async (taskId: string) => {
-    if (!user) return;
+    if (isGuest) return;
     await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', taskId));
     showToast('Task removed', 'info');
   };
 
   const updateTaskQuadrant = async (task: Task, newQuadrant: string) => {
-    if (!user || task.quadrant === newQuadrant) return;
+    if (isGuest || task.quadrant === newQuadrant) return;
     await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', task.id), { quadrant: newQuadrant });
     showToast(`Task moved to ${newQuadrant}`, 'success');
   };
 
   const handleTaskDecomposition = async (task: Task) => {
-    if (!user) return;
+    if (isGuest) return;
     setIsDecomposingId(task.id);
     try {
       const deadlineContext = task.deadline ? `The final deadline for this task is ${new Date(task.deadline).toISOString()}. Calculate a logical deadline for each micro-task that occurs strictly BEFORE the final deadline.` : `There is no strict deadline for this task. Set the micro-tasks deadline fields to an empty string ''.`;
@@ -660,7 +678,7 @@ export default function App() {
   };
 
   const applyManualTriage = async () => {
-    if (!user) return;
+    if (isGuest) return;
     try {
       let updatedCount = 0;
       for (const [taskId, newQuad] of Object.entries(manualTriageSelections)) {
@@ -828,7 +846,10 @@ export default function App() {
     );
   }
 
-  if (!user || user.isAnonymous) {
+  // --- Authentication / Landing Logic ---
+  // If the user has not logged in via an explicit Email/Google provider, they are classified as a Guest
+  // and will be shown the Landing/Login forms to ensure data is permanently saved to an email address.
+  if (isGuest) {
     if (showLandingPage) {
       return (
         <div className={`min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 transition-colors duration-300 font-sans ${theme.appBg}`}>
@@ -942,6 +963,7 @@ export default function App() {
     );
   }
 
+  // --- Main Application UI ---
   const weeklyStats = getWeeklyStats();
 
   return (
@@ -1090,8 +1112,8 @@ export default function App() {
                 <option value="mike">Mike</option>
                 <option value="emma">Emma</option>
                 <option value="jason">Jason</option>
-                <option value="lola">Lola</option>
-                <option value="tunde">Tunde</option>
+                <option value="davis">Davis</option>
+                <option value="raymond">Raymond</option>
               </select>
             </div>
 
@@ -1102,7 +1124,7 @@ export default function App() {
             {isOnline ? <span className="flex-shrink-0 flex items-center gap-1.5 text-emerald-600 dark:text-emerald-500 text-xs font-semibold tracking-wide"><Cloud className="w-4 h-4" /> <span className="hidden lg:inline">Online</span></span> : <span className="flex-shrink-0 flex items-center gap-1.5 text-amber-600 dark:text-amber-500 text-xs font-semibold tracking-wide"><CloudOff className="w-4 h-4" /> <span className="hidden lg:inline">Offline</span></span>}
             <div className={`flex-shrink-0 w-px h-6 mx-1 ${isDarkMode ? 'bg-slate-700' : 'bg-slate-300'}`}></div>
             <div className="flex-shrink-0 flex items-center gap-2 sm:gap-3">
-              <span className={`text-xs font-medium hidden md:block truncate max-w-[120px] ${theme.textMuted}`}>{user.email || 'User'}</span>
+              <span className={`text-xs font-medium hidden md:block truncate max-w-[120px] ${theme.textMuted}`}>{user?.email || 'User'}</span>
               <button onClick={handleSignOut} className={`flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors text-xs font-medium ${isDarkMode ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20' : 'bg-red-50 text-red-600 hover:bg-red-100 shadow-sm'}`} title="Sign Out">
                 <LogOut className="w-4 h-4" /> <span className="hidden sm:inline">Sign Out</span>
               </button>
