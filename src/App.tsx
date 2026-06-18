@@ -9,8 +9,7 @@ import {
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
   getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged,
-  GoogleAuthProvider, signInWithPopup, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, User,
-  setPersistence, browserLocalPersistence
+  GoogleAuthProvider, signInWithPopup, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, User
 } from 'firebase/auth';
 import { 
   getFirestore, collection, doc, setDoc, deleteDoc, updateDoc, 
@@ -209,7 +208,7 @@ export default function App() {
   const handleToggleTheme = async () => {
     const newMode = !isDarkMode;
     setIsDarkMode(newMode);
-    if (!isGuest) {
+    if (!isGuest && user) {
       try {
         const prefRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'preferences');
         await setDoc(prefRef, { isDarkMode: newMode }, { merge: true });
@@ -221,7 +220,7 @@ export default function App() {
 
   const handleChangeVoice = async (newVoice: string) => {
     setAssistantVoice(newVoice);
-    if (!isGuest) {
+    if (!isGuest && user) {
       try {
         const prefRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'preferences');
         await setDoc(prefRef, { assistantVoice: newVoice }, { merge: true });
@@ -233,7 +232,7 @@ export default function App() {
 
   // Fetch Settings on Login
   useEffect(() => {
-    if (isGuest) {
+    if (isGuest || !user) {
       setPrefsLoaded(true);
       return;
     }
@@ -297,7 +296,7 @@ export default function App() {
     }
   }, []);
 
-  // Trigger Welcome Voice Once Per Session (Only after prefs are loaded)
+  // Trigger Welcome Voice Once Per Session
   useEffect(() => {
     if (!isGuest && !isAuthLoading && prefsLoaded && !hasWelcomedRef.current && !showLandingPage) {
       hasWelcomedRef.current = true;
@@ -308,8 +307,8 @@ export default function App() {
     }
   }, [isGuest, isAuthLoading, showLandingPage, assistantVoice, prefsLoaded]);
 
+  // --- Core Firebase Auth Initialization (Bulletproofed for Vercel) ---
   useEffect(() => {
-    // --- Set Tab Title and Favicon ---
     document.title = "Work Flow";
     let link = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
     if (!link) {
@@ -327,29 +326,35 @@ export default function App() {
       Notification.requestPermission().then(setNotificationPermission);
     }
 
-    // Completely Bulletproof Auth Setup
     let isMounted = true;
+    const isCanvasEnv = typeof window !== 'undefined' && (window as any).__app_id;
     
-    const setupAuth = async () => {
-      try {
-        await setPersistence(auth, browserLocalPersistence);
-        const initialToken = typeof window !== 'undefined' ? (window as any).__initial_auth_token : undefined;
-        if (initialToken && !auth.currentUser) {
-           await signInWithCustomToken(auth, initialToken);
+    const initializeAuth = async () => {
+      // 1. Await Firebase's internal restoration of the session from the browser's IndexedDB. 
+      // This strictly prevents the app from rendering the login screen if an active session exists.
+      await auth.authStateReady(); 
+      
+      // 2. Only inject a temporary session if the app is strictly inside the Canvas editor 
+      // and NO email session was found. On Vercel, this is bypassed.
+      if (isCanvasEnv && !auth.currentUser) {
+        const initialToken = (window as any).__initial_auth_token;
+        if (initialToken) {
+          try { await signInWithCustomToken(auth, initialToken); } 
+          catch (e) { await signInAnonymously(auth); }
+        } else {
+          await signInAnonymously(auth);
         }
-      } catch (error) {
-        console.error("Auth Setup Error:", error);
       }
+
+      // 3. Unblock the loading screen.
+      if (isMounted) setIsAuthLoading(false);
     };
 
-    setupAuth();
+    initializeAuth();
 
-    // Listen to Auth State explicitly without fallback loops
+    // 4. Standard state listener syncs React state dynamically.
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      if (isMounted) {
-        setUser(currentUser);
-        setIsAuthLoading(false);
-      }
+      if (isMounted) setUser(currentUser);
     });
 
     return () => {
@@ -359,7 +364,7 @@ export default function App() {
     };
   }, []);
 
-  // Monitor Q1 tasks to automatically announce cognitive overload exactly ONCE when threshold is reached
+  // Monitor Q1 tasks to automatically announce cognitive overload
   useEffect(() => {
     const q1Count = tasks.filter(t => t.quadrant === 'Q1' && t.status !== 'completed').length;
     if (q1Count >= 4) {
@@ -385,7 +390,7 @@ export default function App() {
         const taskTime = new Date(task.deadline).getTime();
         const diffMinutes = Math.round((taskTime - nowTime) / (1000 * 60));
         
-        if (diffMinutes < 0 && task.quadrant === 'Q2' && !isGuest) {
+        if (diffMinutes < 0 && task.quadrant === 'Q2' && !isGuest && user) {
           const taskRef = doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', task.id);
           await updateDoc(taskRef, { quadrant: 'Q1' });
           showToast(`Escalation: "${task.title}" running past timeline; moved to Q1 Crisis`, 'error');
@@ -460,18 +465,22 @@ export default function App() {
     hasWelcomedRef.current = false;
     setAuthEmail('');
     setAuthPassword('');
-    await signOut(auth); // Properly clears out Firebase session, no Ghost re-login triggers
-    setShowLandingPage(true);
+    try {
+      await signOut(auth);
+      setShowLandingPage(true);
+    } catch (e) {
+      console.error("Sign Out Error:", e);
+    }
   };
 
-  // Data Fetching Sync using UID and Dynamic App ID
+  // Data Fetching Sync
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
-    if (isGuest) return;
+    if (isGuest || !user) return;
     setSyncing(true);
     
     const q = query(collection(db, 'artifacts', appId, 'users', user.uid, 'tasks'));
@@ -510,7 +519,7 @@ export default function App() {
   };
 
   const saveTaskToDb = async (taskData: { title: string; deadline: string; isImportant: boolean }) => {
-    if (isGuest) return;
+    if (isGuest || !user) return;
     const taskRef = doc(collection(db, 'artifacts', appId, 'users', user.uid, 'tasks'));
     await setDoc(taskRef, {
       id: taskRef.id,
@@ -523,7 +532,7 @@ export default function App() {
 
   const handleManualAddTask = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title || isGuest) return;
+    if (!title || isGuest || !user) return;
     const taskData = { title, deadline, isImportant };
     setTitle(''); setDeadline(''); setIsImportant(false);
 
@@ -536,7 +545,7 @@ export default function App() {
   };
 
   const toggleTaskStatus = async (task: Task) => {
-    if (isGuest) return;
+    if (isGuest || !user) return;
     const isNowCompleted = task.status !== 'completed';
     await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', task.id), { 
       status: isNowCompleted ? 'completed' : 'pending',
@@ -546,19 +555,19 @@ export default function App() {
   };
 
   const handleDeleteTask = async (taskId: string) => {
-    if (isGuest) return;
+    if (isGuest || !user) return;
     await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', taskId));
     showToast('Task removed', 'info');
   };
 
   const updateTaskQuadrant = async (task: Task, newQuadrant: string) => {
-    if (isGuest || task.quadrant === newQuadrant) return;
+    if (isGuest || !user || task.quadrant === newQuadrant) return;
     await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', task.id), { quadrant: newQuadrant });
     showToast(`Task moved to ${newQuadrant}`, 'success');
   };
 
   const handleTaskDecomposition = async (task: Task) => {
-    if (isGuest) return;
+    if (isGuest || !user) return;
     setIsDecomposingId(task.id);
     try {
       const deadlineContext = task.deadline ? `The final deadline for this task is ${new Date(task.deadline).toISOString()}. Calculate a logical deadline for each micro-task that occurs strictly BEFORE the final deadline.` : `There is no strict deadline for this task. Set the micro-tasks deadline fields to an empty string ''.`;
@@ -683,7 +692,7 @@ export default function App() {
   };
 
   const applyManualTriage = async () => {
-    if (isGuest) return;
+    if (isGuest || !user) return;
     try {
       let updatedCount = 0;
       for (const [taskId, newQuad] of Object.entries(manualTriageSelections)) {
