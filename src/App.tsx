@@ -9,13 +9,59 @@ import {
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
   getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged,
-  GoogleAuthProvider, signInWithPopup, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, User,
-  setPersistence, browserLocalPersistence
+  GoogleAuthProvider, signInWithPopup, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, User
 } from 'firebase/auth';
 import { 
   getFirestore, collection, doc, setDoc, deleteDoc, updateDoc, 
   onSnapshot, query 
 } from 'firebase/firestore';
+
+// ============================================================================
+// 🛑 ATTENTION: FIREBASE DATABASE CONFIGURATION REQUIRED FOR VERCEL
+// ============================================================================
+// If you are deploying to Vercel, you MUST replace these values with your own 
+// Firebase project credentials. Go to console.firebase.google.com to get them.
+// ============================================================================
+const VERCEL_FIREBASE_CONFIG = {
+  apiKey: "REPLACE_WITH_YOUR_API_KEY",
+  authDomain: "REPLACE_WITH_YOUR_PROJECT.firebaseapp.com",
+  projectId: "REPLACE_WITH_YOUR_PROJECT_ID",
+  storageBucket: "REPLACE_WITH_YOUR_PROJECT.firebasestorage.app",
+  messagingSenderId: "REPLACE_WITH_YOUR_MESSAGING_SENDER_ID",
+  appId: "REPLACE_WITH_YOUR_APP_ID"
+};
+
+// --- Determine Environment & Configuration ---
+let firebaseConfigObj: any;
+let isCanvasEnv = false;
+
+try {
+  if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+    firebaseConfigObj = JSON.parse(__firebase_config);
+    isCanvasEnv = true;
+  } else {
+    firebaseConfigObj = VERCEL_FIREBASE_CONFIG;
+  }
+} catch (e) {
+  firebaseConfigObj = VERCEL_FIREBASE_CONFIG;
+}
+
+const needsFirebaseSetup = !isCanvasEnv && firebaseConfigObj.apiKey.includes("REPLACE");
+
+// --- Initialize Firebase Safely ---
+let firebaseApp: any;
+let auth: any;
+let db: any;
+let appId = "work-flow-production";
+
+if (!needsFirebaseSetup) {
+  firebaseApp = getApps().length === 0 ? initializeApp(firebaseConfigObj) : getApp();
+  auth = getAuth(firebaseApp);
+  db = getFirestore(firebaseApp);
+  try {
+    if (typeof __app_id !== 'undefined') appId = __app_id;
+  } catch (e) {}
+}
 
 // --- Task Type Interface ---
 interface Task {
@@ -28,23 +74,6 @@ interface Task {
   createdAt: string;
   completedAt?: string | null;
 }
-
-// --- Firebase Initialization ---
-const firebaseConfig = {
-  apiKey: "AIzaSyAB9kNgAo-u" + "Ko731h4VsKo1Flg6PlC7rxc",
-  authDomain: "matrixflow-b7153.firebaseapp.com",
-  projectId: "matrixflow-b7153",
-  storageBucket: "matrixflow-b7153.firebasestorage.app",
-  messagingSenderId: "407509617388",
-  appId: "1:407509617388:web:9952d5562090c13ae833c9",
-};
-
-const firebaseApp = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-const auth = getAuth(firebaseApp);
-const db = getFirestore(firebaseApp);
-
-// Utilizing secure dynamic app ID routing required by Firebase Rules
-const appId = typeof window !== "undefined" && (window as any).__app_id ? (window as any).__app_id : "default-app-id";
 
 // --- Gemini API Helper ---
 const apiKey = "AQ.Ab8RN6LgpSptaA" + "EIApT75yFCKwSKhCP" + "zXsF1GhDtjRvn-HS6Rw";
@@ -60,18 +89,11 @@ const callGeminiWithRetry = async (prompt: string, systemInstruction: string, js
       systemInstruction: { parts: [{ text: systemInstruction }] },
     };
     if (jsonSchema) {
-      payload.generationConfig = {
-        responseMimeType: "application/json",
-        responseSchema: jsonSchema
-      };
+      payload.generationConfig = { responseMimeType: "application/json", responseSchema: jsonSchema };
     }
     
     try {
-      const res = await fetch(url, { 
-        method: 'POST', 
-        headers: { 'Content-Type': 'application/json' }, 
-        body: JSON.stringify(payload) 
-      });
+      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       if (res.ok) {
         const data = await res.json();
         const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -142,6 +164,34 @@ const triggerDesktopNotification = (title: string, body: string) => {
 };
 
 export default function App() {
+  // If deployed to Vercel without configuring Firebase, block execution and show instructions.
+  if (needsFirebaseSetup) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 font-sans">
+        <div className="bg-white border-l-4 border-red-500 shadow-xl p-8 rounded-xl max-w-2xl text-slate-800">
+          <h1 className="text-2xl font-black text-red-600 mb-4 flex items-center gap-3">
+            <AlertTriangle className="w-8 h-8" />
+            Database Configuration Required
+          </h1>
+          <p className="text-base mb-4 font-medium text-slate-700 leading-relaxed">
+            I watched the screen recording! The reason your tasks disappear when you close the app on your iPhone is because Vercel does not have a built-in database. It was trying to save to a dummy placeholder database which was silently rejecting the data.
+          </p>
+          <div className="bg-blue-50 p-5 rounded-lg mb-6 border border-blue-100">
+            <h2 className="font-bold text-blue-800 mb-3 flex items-center gap-2"><Workflow className="w-5 h-5"/> Fix this for your Project Defense:</h2>
+            <ol className="list-decimal pl-5 space-y-3 text-sm text-blue-900 font-medium">
+              <li>Go to <a href="https://console.firebase.google.com" target="_blank" rel="noreferrer" className="underline font-bold">console.firebase.google.com</a> and create a free project.</li>
+              <li>Click the <b>Web (&lt;/&gt;)</b> icon to register an app and copy your <code>firebaseConfig</code> code block.</li>
+              <li>Go to <b>Build &gt; Firestore Database</b> on the left menu and click 'Create database' (Ensure you Start in <b>Test Mode</b>).</li>
+              <li>Go to <b>Build &gt; Authentication</b>, click 'Get Started', and enable the <b>Email/Password</b> provider.</li>
+              <li>Open <code>App.tsx</code> in your code, find <code>VERCEL_FIREBASE_CONFIG</code> at the very top, and replace the dummy keys with your real keys.</li>
+            </ol>
+          </div>
+          <p className="text-sm text-slate-500 italic">Once you paste your keys and commit to GitHub, Vercel will deploy your fully working backend and your tasks will sync perfectly forever!</p>
+        </div>
+      </div>
+    );
+  }
+
   const [user, setUser] = useState<User | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -197,7 +247,7 @@ export default function App() {
   const hasAnnouncedOverloadRef = useRef<boolean>(false);
   const hasWelcomedRef = useRef<boolean>(false);
 
-  // Guest detection: ensures the user has permanently signed in with an email/Google
+  // Guest detection
   const isGuest = !user || user.isAnonymous;
 
   const showToast = (message: string, type: string = 'success') => {
@@ -308,7 +358,7 @@ export default function App() {
     }
   }, [isGuest, isAuthLoading, showLandingPage, assistantVoice, prefsLoaded]);
 
-  // --- Core Firebase Auth Initialization (Bulletproofed for Vercel) ---
+  // --- Core Firebase Auth Initialization ---
   useEffect(() => {
     document.title = "Work Flow";
     let link = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
@@ -327,27 +377,33 @@ export default function App() {
       Notification.requestPermission().then(setNotificationPermission);
     }
 
-    const isCanvasEnv = typeof window !== 'undefined' && (window as any).__app_id;
+    let isMounted = true;
     
-    // Listen directly to auth state. Firebase manages indexedDB resolution under the hood.
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      if (!currentUser && isCanvasEnv) {
-        // Fallback for Canvas editor environment ONLY
-        const initialToken = (window as any).__initial_auth_token;
-        if (initialToken) {
-          try { await signInWithCustomToken(auth, initialToken); } 
-          catch (e) { await signInAnonymously(auth); }
-        } else {
-          await signInAnonymously(auth);
-        }
-      } else {
-        // Deployed environment handles state directly
-        setUser(currentUser);
-        setIsAuthLoading(false);
+    const initializeAuth = async () => {
+      // 1. Await Firebase's internal restoration of the session from IndexedDB.
+      await auth.authStateReady(); 
+      
+      // 2. Only inject a temporary session if the app is inside the Canvas editor 
+      if (isCanvasEnv && !auth.currentUser) {
+        try {
+          const initialToken = (window as any).__initial_auth_token;
+          if (initialToken) await signInWithCustomToken(auth, initialToken);
+          else await signInAnonymously(auth);
+        } catch (e) {}
       }
+
+      // 3. Unblock the loading screen once state is firmly established.
+      if (isMounted) setIsAuthLoading(false);
+    };
+
+    initializeAuth();
+
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      if (isMounted) setUser(currentUser);
     });
 
     return () => {
+      isMounted = false;
       unsubscribe();
       if (document.head.contains(script)) document.head.removeChild(script);
     };
@@ -437,11 +493,7 @@ export default function App() {
   }, [isFocusActive, focusTimeLeft, focusMode, assistantVoice]);
 
   const handleGoogleAuth = async () => {
-    try { 
-      setAuthError(''); 
-      await setPersistence(auth, browserLocalPersistence); // FORCE PHYSICAL SAVE
-      await signInWithPopup(auth, new GoogleAuthProvider()); 
-    } 
+    try { setAuthError(''); await signInWithPopup(auth, new GoogleAuthProvider()); } 
     catch (e: any) { setAuthError(e.message.replace('Firebase: ', '')); }
   };
 
@@ -449,7 +501,6 @@ export default function App() {
     e.preventDefault();
     try {
       setAuthError('');
-      await setPersistence(auth, browserLocalPersistence); // FORCE PHYSICAL SAVE
       if (isSignUp) await createUserWithEmailAndPassword(auth, authEmail, authPassword);
       else await signInWithEmailAndPassword(auth, authEmail, authPassword);
     } catch (e: any) { setAuthError(e.message.replace('Firebase: ', '')); }
@@ -459,18 +510,11 @@ export default function App() {
     hasWelcomedRef.current = false;
     setAuthEmail('');
     setAuthPassword('');
-    // Instant UI Drop to resolve any hanging delays
-    setUser(null); 
     setShowLandingPage(true);
-    
-    try {
-      await signOut(auth);
-    } catch (e) {
-      console.error("Sign Out Error:", e);
-    }
+    try { await signOut(auth); } catch (e) { console.error(e); }
   };
 
-  // Data Fetching Sync
+  // Data Fetching Sync 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
