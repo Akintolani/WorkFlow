@@ -312,11 +312,7 @@ export default function App() {
     // --- Set Tab Title and Favicon ---
     document.title = "Work Flow";
     let link = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
-    if (!link) {
-      link = document.createElement('link');
-      link.rel = 'icon';
-      document.head.appendChild(link);
-    }
+    // Encoded SVG of the Workflow Icon for the browser tab
     link.href = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='3' width='6' height='6' rx='1'></rect><rect x='15' y='15' width='6' height='6' rx='1'></rect><path d='M9 6h4a2 2 0 0 1 2 2v6'></path></svg>";
 
     const script = document.createElement('script');
@@ -327,29 +323,33 @@ export default function App() {
       Notification.requestPermission().then(setNotificationPermission);
     }
 
-    // Explicitly enforce local persistence and wait for session resolution
-    const initializeAuth = async () => {
-       await setPersistence(auth, browserLocalPersistence);
-       await auth.authStateReady(); // Waits for Firebase to load from IndexedDB before rendering
-       
-       if (!auth.currentUser) {
-         const initialToken = typeof window !== 'undefined' ? (window as any).__initial_auth_token : undefined;
-         if (initialToken) {
-           try { await signInWithCustomToken(auth, initialToken); } 
-           catch (error) { await signInAnonymously(auth); }
-         } else {
-           await signInAnonymously(auth);
-         }
-       }
-       setIsAuthLoading(false); // Only disable loading screen AFTER state is resolved
-    };
-    initializeAuth();
-
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
+    // Robust Auth Resolution: Strictly rely on onAuthStateChanged to prevent race conditions 
+    // that accidentally overwrite your saved Email session with a blank Anonymous session on refresh.
+    let isMounted = true;
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (currentUser) {
+        if (isMounted) {
+          setUser(currentUser);
+          setIsAuthLoading(false);
+        }
+      } else {
+        // Only generate an anonymous fallback if absolutely no saved session exists
+        const initialToken = typeof window !== 'undefined' ? (window as any).__initial_auth_token : undefined;
+        try {
+          if (initialToken) {
+            await signInWithCustomToken(auth, initialToken);
+          } else {
+            await signInAnonymously(auth);
+          }
+        } catch (e) {
+          console.error("Auth fallback error:", e);
+          if (isMounted) setIsAuthLoading(false);
+        }
+      }
     });
 
     return () => {
+      isMounted = false;
       unsubscribe();
       if (document.head.contains(script)) document.head.removeChild(script);
     };
