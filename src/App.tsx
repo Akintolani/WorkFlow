@@ -9,7 +9,8 @@ import {
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
   getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged,
-  GoogleAuthProvider, signInWithPopup, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, User
+  GoogleAuthProvider, signInWithPopup, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, User,
+  setPersistence, browserLocalPersistence
 } from 'firebase/auth';
 import { 
   getFirestore, collection, doc, setDoc, deleteDoc, updateDoc, 
@@ -42,7 +43,17 @@ const firebaseApp = getApps().length === 0 ? initializeApp(firebaseConfig) : get
 const auth = getAuth(firebaseApp);
 const db = getFirestore(firebaseApp);
 
-const appId = typeof window !== "undefined" && (window as any).__app_id ? (window as any).__app_id : "default-app-id";
+// Hardcoded Global App ID to ensure cross-device synchronization points to the exact same database silo
+const SYNC_APP_ID = "workflow-global-sync";
+
+// --- Helper: Get Sync Key (Email as Primary Identifier) ---
+const getUserSyncKey = (u: User | null) => {
+  if (!u) return 'anonymous';
+  // CRITICAL FIX: Firebase Security Rules strictly block database access if the path 
+  // contains an email address instead of the encrypted UID. 
+  // Firebase natively ensures your UID is identical across all devices when you log in!
+  return u.uid; 
+};
 
 // --- Gemini API Helper ---
 const apiKey = "AQ.Ab8RN6LgpSptaA" + "EIApT75yFCKwSKhCP" + "zXsF1GhDtjRvn-HS6Rw";
@@ -135,7 +146,7 @@ const playAlarmFor30Seconds = () => {
 const triggerDesktopNotification = (title: string, body: string) => {
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth <= 768;
   if (!isMobile && 'Notification' in window && Notification.permission === 'granted') {
-    new Notification(title, { body, requireInteraction: true }); // requireInteraction overrides Do Not Disturb gracefully on desktop
+    new Notification(title, { body, requireInteraction: true }); 
   }
 };
 
@@ -209,7 +220,8 @@ export default function App() {
     setIsDarkMode(newMode);
     if (!isGuest) {
       try {
-        const prefRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'preferences');
+        const syncKey = getUserSyncKey(user);
+        const prefRef = doc(db, 'artifacts', SYNC_APP_ID, 'users', syncKey, 'settings', 'preferences');
         await setDoc(prefRef, { isDarkMode: newMode }, { merge: true });
       } catch (e) {
         console.error("Failed to sync theme", e);
@@ -221,7 +233,8 @@ export default function App() {
     setAssistantVoice(newVoice);
     if (!isGuest) {
       try {
-        const prefRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'preferences');
+        const syncKey = getUserSyncKey(user);
+        const prefRef = doc(db, 'artifacts', SYNC_APP_ID, 'users', syncKey, 'settings', 'preferences');
         await setDoc(prefRef, { assistantVoice: newVoice }, { merge: true });
       } catch (e) {
         console.error("Failed to sync voice", e);
@@ -235,7 +248,8 @@ export default function App() {
       setPrefsLoaded(true);
       return;
     }
-    const prefRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'preferences');
+    const syncKey = getUserSyncKey(user);
+    const prefRef = doc(db, 'artifacts', SYNC_APP_ID, 'users', syncKey, 'settings', 'preferences');
     const unsubscribe = onSnapshot(prefRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
@@ -315,7 +329,6 @@ export default function App() {
       link.rel = 'icon';
       document.head.appendChild(link);
     }
-    // Encoded SVG of the Workflow Icon for the browser tab
     link.href = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='3' width='6' height='6' rx='1'></rect><rect x='15' y='15' width='6' height='6' rx='1'></rect><path d='M9 6h4a2 2 0 0 1 2 2v6'></path></svg>";
 
     const script = document.createElement('script');
@@ -326,12 +339,12 @@ export default function App() {
       Notification.requestPermission().then(setNotificationPermission);
     }
 
-    // Advanced Initial Auth Resolution: Waits for Firebase to properly check if an Email session is already saved in the browser.
+    // Explicitly enforce local persistence to bypass strict sandbox wipeouts
     const initializeAuth = async () => {
-       await auth.authStateReady(); // Wait for IndexedDB session restore
+       await setPersistence(auth, browserLocalPersistence);
+       await auth.authStateReady(); 
        
        if (!auth.currentUser) {
-         // User is completely logged out. Inject the guest session so security rules pass on the landing page.
          const initialToken = typeof window !== 'undefined' ? (window as any).__initial_auth_token : undefined;
          if (initialToken) {
            try { await signInWithCustomToken(auth, initialToken); } 
@@ -381,7 +394,8 @@ export default function App() {
         const diffMinutes = Math.round((taskTime - nowTime) / (1000 * 60));
         
         if (diffMinutes < 0 && task.quadrant === 'Q2' && !isGuest) {
-          const taskRef = doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', task.id);
+          const syncKey = getUserSyncKey(user);
+          const taskRef = doc(db, 'artifacts', SYNC_APP_ID, 'users', syncKey, 'tasks', task.id);
           await updateDoc(taskRef, { quadrant: 'Q1' });
           showToast(`Escalation: "${task.title}" running past timeline; moved to Q1 Crisis`, 'error');
         }
@@ -459,7 +473,7 @@ export default function App() {
     setShowLandingPage(true);
   };
 
-  // Data Fetching Sync Using Explicit UID (Guarantees Global Sync for Email Users without hitting security rule blocks)
+  // Data Fetching Sync using STRICT SyncKey (Email) and Global App ID
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
@@ -469,7 +483,8 @@ export default function App() {
     if (isGuest) return;
     setSyncing(true);
     
-    const q = query(collection(db, 'artifacts', appId, 'users', user.uid, 'tasks'));
+    const syncKey = getUserSyncKey(user);
+    const q = query(collection(db, 'artifacts', SYNC_APP_ID, 'users', syncKey, 'tasks'));
 
     const unsubscribe = onSnapshot(q, 
       (snapshot) => {
@@ -506,7 +521,8 @@ export default function App() {
 
   const saveTaskToDb = async (taskData: { title: string; deadline: string; isImportant: boolean }) => {
     if (isGuest) return;
-    const taskRef = doc(collection(db, 'artifacts', appId, 'users', user.uid, 'tasks'));
+    const syncKey = getUserSyncKey(user);
+    const taskRef = doc(collection(db, 'artifacts', SYNC_APP_ID, 'users', syncKey, 'tasks'));
     await setDoc(taskRef, {
       id: taskRef.id,
       ...taskData,
@@ -532,8 +548,9 @@ export default function App() {
 
   const toggleTaskStatus = async (task: Task) => {
     if (isGuest) return;
+    const syncKey = getUserSyncKey(user);
     const isNowCompleted = task.status !== 'completed';
-    await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', task.id), { 
+    await updateDoc(doc(db, 'artifacts', SYNC_APP_ID, 'users', syncKey, 'tasks', task.id), { 
       status: isNowCompleted ? 'completed' : 'pending',
       completedAt: isNowCompleted ? new Date().toISOString() : null
     });
@@ -542,18 +559,21 @@ export default function App() {
 
   const handleDeleteTask = async (taskId: string) => {
     if (isGuest) return;
-    await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', taskId));
+    const syncKey = getUserSyncKey(user);
+    await deleteDoc(doc(db, 'artifacts', SYNC_APP_ID, 'users', syncKey, 'tasks', taskId));
     showToast('Task removed', 'info');
   };
 
   const updateTaskQuadrant = async (task: Task, newQuadrant: string) => {
     if (isGuest || task.quadrant === newQuadrant) return;
-    await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', task.id), { quadrant: newQuadrant });
+    const syncKey = getUserSyncKey(user);
+    await updateDoc(doc(db, 'artifacts', SYNC_APP_ID, 'users', syncKey, 'tasks', task.id), { quadrant: newQuadrant });
     showToast(`Task moved to ${newQuadrant}`, 'success');
   };
 
   const handleTaskDecomposition = async (task: Task) => {
     if (isGuest) return;
+    const syncKey = getUserSyncKey(user);
     setIsDecomposingId(task.id);
     try {
       const deadlineContext = task.deadline ? `The final deadline for this task is ${new Date(task.deadline).toISOString()}. Calculate a logical deadline for each micro-task that occurs strictly BEFORE the final deadline.` : `There is no strict deadline for this task. Set the micro-tasks deadline fields to an empty string ''.`;
@@ -584,7 +604,7 @@ export default function App() {
         for (const sub of result.subtasks) {
           await saveTaskToDb({ title: `[Step] ${sub.title}`, deadline: sub.deadline ? sub.deadline.slice(0, 16) : '', isImportant: task.isImportant });
         }
-        await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', task.id));
+        await deleteDoc(doc(db, 'artifacts', SYNC_APP_ID, 'users', syncKey, 'tasks', task.id));
         showToast(`Task successfully decomposed into ${result.subtasks.length} actionable steps.`, 'success');
       } else {
         showToast('AI could not decompose this task further.', 'info');
@@ -679,12 +699,13 @@ export default function App() {
 
   const applyManualTriage = async () => {
     if (isGuest) return;
+    const syncKey = getUserSyncKey(user);
     try {
       let updatedCount = 0;
       for (const [taskId, newQuad] of Object.entries(manualTriageSelections)) {
         const task = tasks.find(t => t.id === taskId);
         if (task && task.quadrant !== newQuad) {
-          await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', taskId), { quadrant: newQuad });
+          await updateDoc(doc(db, 'artifacts', SYNC_APP_ID, 'users', syncKey, 'tasks', taskId), { quadrant: newQuad });
           updatedCount++;
         }
       }
