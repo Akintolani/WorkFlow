@@ -43,17 +43,8 @@ const firebaseApp = getApps().length === 0 ? initializeApp(firebaseConfig) : get
 const auth = getAuth(firebaseApp);
 const db = getFirestore(firebaseApp);
 
-// Hardcoded Global App ID to ensure cross-device synchronization points to the exact same database silo
-const SYNC_APP_ID = "workflow-global-sync";
-
-// --- Helper: Get Sync Key (Email as Primary Identifier) ---
-const getUserSyncKey = (u: User | null) => {
-  if (!u) return 'anonymous';
-  // CRITICAL FIX: Firebase Security Rules strictly block database access if the path 
-  // contains an email address instead of the encrypted UID. 
-  // Firebase natively ensures your UID is identical across all devices when you log in!
-  return u.uid; 
-};
+// Utilizing secure dynamic app ID routing required by Firebase Rules
+const appId = typeof window !== "undefined" && (window as any).__app_id ? (window as any).__app_id : "default-app-id";
 
 // --- Gemini API Helper ---
 const apiKey = "AQ.Ab8RN6LgpSptaA" + "EIApT75yFCKwSKhCP" + "zXsF1GhDtjRvn-HS6Rw";
@@ -207,7 +198,7 @@ export default function App() {
   const hasWelcomedRef = useRef<boolean>(false);
 
   // Guest detection: ensures the user has permanently signed in with an email/Google
-  const isGuest = !user || user.isAnonymous || user.providerData.length === 0;
+  const isGuest = !user || user.isAnonymous;
 
   const showToast = (message: string, type: string = 'success') => {
     setToast({ message, type });
@@ -220,8 +211,7 @@ export default function App() {
     setIsDarkMode(newMode);
     if (!isGuest) {
       try {
-        const syncKey = getUserSyncKey(user);
-        const prefRef = doc(db, 'artifacts', SYNC_APP_ID, 'users', syncKey, 'settings', 'preferences');
+        const prefRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'preferences');
         await setDoc(prefRef, { isDarkMode: newMode }, { merge: true });
       } catch (e) {
         console.error("Failed to sync theme", e);
@@ -233,8 +223,7 @@ export default function App() {
     setAssistantVoice(newVoice);
     if (!isGuest) {
       try {
-        const syncKey = getUserSyncKey(user);
-        const prefRef = doc(db, 'artifacts', SYNC_APP_ID, 'users', syncKey, 'settings', 'preferences');
+        const prefRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'preferences');
         await setDoc(prefRef, { assistantVoice: newVoice }, { merge: true });
       } catch (e) {
         console.error("Failed to sync voice", e);
@@ -248,8 +237,7 @@ export default function App() {
       setPrefsLoaded(true);
       return;
     }
-    const syncKey = getUserSyncKey(user);
-    const prefRef = doc(db, 'artifacts', SYNC_APP_ID, 'users', syncKey, 'settings', 'preferences');
+    const prefRef = doc(db, 'artifacts', appId, 'users', user.uid, 'settings', 'preferences');
     const unsubscribe = onSnapshot(prefRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
@@ -339,10 +327,10 @@ export default function App() {
       Notification.requestPermission().then(setNotificationPermission);
     }
 
-    // Explicitly enforce local persistence to bypass strict sandbox wipeouts
+    // Explicitly enforce local persistence and wait for session resolution
     const initializeAuth = async () => {
        await setPersistence(auth, browserLocalPersistence);
-       await auth.authStateReady(); 
+       await auth.authStateReady(); // Waits for Firebase to load from IndexedDB before rendering
        
        if (!auth.currentUser) {
          const initialToken = typeof window !== 'undefined' ? (window as any).__initial_auth_token : undefined;
@@ -353,12 +341,12 @@ export default function App() {
            await signInAnonymously(auth);
          }
        }
+       setIsAuthLoading(false); // Only disable loading screen AFTER state is resolved
     };
     initializeAuth();
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
-      setIsAuthLoading(false);
     });
 
     return () => {
@@ -394,8 +382,7 @@ export default function App() {
         const diffMinutes = Math.round((taskTime - nowTime) / (1000 * 60));
         
         if (diffMinutes < 0 && task.quadrant === 'Q2' && !isGuest) {
-          const syncKey = getUserSyncKey(user);
-          const taskRef = doc(db, 'artifacts', SYNC_APP_ID, 'users', syncKey, 'tasks', task.id);
+          const taskRef = doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', task.id);
           await updateDoc(taskRef, { quadrant: 'Q1' });
           showToast(`Escalation: "${task.title}" running past timeline; moved to Q1 Crisis`, 'error');
         }
@@ -473,7 +460,7 @@ export default function App() {
     setShowLandingPage(true);
   };
 
-  // Data Fetching Sync using STRICT SyncKey (Email) and Global App ID
+  // Data Fetching Sync using UID and Dynamic App ID
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
@@ -483,8 +470,7 @@ export default function App() {
     if (isGuest) return;
     setSyncing(true);
     
-    const syncKey = getUserSyncKey(user);
-    const q = query(collection(db, 'artifacts', SYNC_APP_ID, 'users', syncKey, 'tasks'));
+    const q = query(collection(db, 'artifacts', appId, 'users', user.uid, 'tasks'));
 
     const unsubscribe = onSnapshot(q, 
       (snapshot) => {
@@ -521,8 +507,7 @@ export default function App() {
 
   const saveTaskToDb = async (taskData: { title: string; deadline: string; isImportant: boolean }) => {
     if (isGuest) return;
-    const syncKey = getUserSyncKey(user);
-    const taskRef = doc(collection(db, 'artifacts', SYNC_APP_ID, 'users', syncKey, 'tasks'));
+    const taskRef = doc(collection(db, 'artifacts', appId, 'users', user.uid, 'tasks'));
     await setDoc(taskRef, {
       id: taskRef.id,
       ...taskData,
@@ -548,9 +533,8 @@ export default function App() {
 
   const toggleTaskStatus = async (task: Task) => {
     if (isGuest) return;
-    const syncKey = getUserSyncKey(user);
     const isNowCompleted = task.status !== 'completed';
-    await updateDoc(doc(db, 'artifacts', SYNC_APP_ID, 'users', syncKey, 'tasks', task.id), { 
+    await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', task.id), { 
       status: isNowCompleted ? 'completed' : 'pending',
       completedAt: isNowCompleted ? new Date().toISOString() : null
     });
@@ -559,21 +543,18 @@ export default function App() {
 
   const handleDeleteTask = async (taskId: string) => {
     if (isGuest) return;
-    const syncKey = getUserSyncKey(user);
-    await deleteDoc(doc(db, 'artifacts', SYNC_APP_ID, 'users', syncKey, 'tasks', taskId));
+    await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', taskId));
     showToast('Task removed', 'info');
   };
 
   const updateTaskQuadrant = async (task: Task, newQuadrant: string) => {
     if (isGuest || task.quadrant === newQuadrant) return;
-    const syncKey = getUserSyncKey(user);
-    await updateDoc(doc(db, 'artifacts', SYNC_APP_ID, 'users', syncKey, 'tasks', task.id), { quadrant: newQuadrant });
+    await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', task.id), { quadrant: newQuadrant });
     showToast(`Task moved to ${newQuadrant}`, 'success');
   };
 
   const handleTaskDecomposition = async (task: Task) => {
     if (isGuest) return;
-    const syncKey = getUserSyncKey(user);
     setIsDecomposingId(task.id);
     try {
       const deadlineContext = task.deadline ? `The final deadline for this task is ${new Date(task.deadline).toISOString()}. Calculate a logical deadline for each micro-task that occurs strictly BEFORE the final deadline.` : `There is no strict deadline for this task. Set the micro-tasks deadline fields to an empty string ''.`;
@@ -604,7 +585,7 @@ export default function App() {
         for (const sub of result.subtasks) {
           await saveTaskToDb({ title: `[Step] ${sub.title}`, deadline: sub.deadline ? sub.deadline.slice(0, 16) : '', isImportant: task.isImportant });
         }
-        await deleteDoc(doc(db, 'artifacts', SYNC_APP_ID, 'users', syncKey, 'tasks', task.id));
+        await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', task.id));
         showToast(`Task successfully decomposed into ${result.subtasks.length} actionable steps.`, 'success');
       } else {
         showToast('AI could not decompose this task further.', 'info');
@@ -699,13 +680,12 @@ export default function App() {
 
   const applyManualTriage = async () => {
     if (isGuest) return;
-    const syncKey = getUserSyncKey(user);
     try {
       let updatedCount = 0;
       for (const [taskId, newQuad] of Object.entries(manualTriageSelections)) {
         const task = tasks.find(t => t.id === taskId);
         if (task && task.quadrant !== newQuad) {
-          await updateDoc(doc(db, 'artifacts', SYNC_APP_ID, 'users', syncKey, 'tasks', taskId), { quadrant: newQuad });
+          await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', taskId), { quadrant: newQuad });
           updatedCount++;
         }
       }
@@ -818,6 +798,11 @@ export default function App() {
                     {new Date(task.deadline).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                     {isOverdue && <span className="text-[10px] tracking-wider uppercase px-1.5 py-0.5 bg-amber-500/10 rounded font-black border border-amber-500/20">Overdue</span>}
                   </span>
+                ) : task.status === 'completed' && task.completedAt ? (
+                  <span className={`text-xs ${theme.textMuted} flex items-center gap-1.5 font-medium`}>
+                    <CheckCircle2 className="w-3.5 h-3.5 opacity-60" /> 
+                    Done: {new Date(task.completedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                  </span>
                 ) : (
                   <span className={`text-xs ${theme.textMuted} flex items-center gap-1.5 font-medium`}>
                     <Clock className="w-3.5 h-3.5 opacity-50" /> No timeline
@@ -868,8 +853,6 @@ export default function App() {
   }
 
   // --- Authentication / Landing Logic ---
-  // If the user has not logged in via an explicit Email/Google provider, they are classified as a Guest
-  // and will be shown the Landing/Login forms to ensure data is permanently saved to an email address.
   if (isGuest) {
     if (showLandingPage) {
       return (
