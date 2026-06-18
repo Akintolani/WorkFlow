@@ -9,59 +9,30 @@ import {
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
   getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged,
-  GoogleAuthProvider, signInWithPopup, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, User
+  GoogleAuthProvider, signInWithPopup, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, User,
+  setPersistence, browserLocalPersistence
 } from 'firebase/auth';
 import { 
   getFirestore, collection, doc, setDoc, deleteDoc, updateDoc, 
   onSnapshot, query 
 } from 'firebase/firestore';
 
-// ============================================================================
-// 🛑 ATTENTION: FIREBASE DATABASE CONFIGURATION REQUIRED FOR VERCEL
-// ============================================================================
-// If you are deploying to Vercel, you MUST replace these values with your own 
-// Firebase project credentials. Go to console.firebase.google.com to get them.
-// ============================================================================
-const VERCEL_FIREBASE_CONFIG = {
-  apiKey: "REPLACE_WITH_YOUR_API_KEY",
-  authDomain: "REPLACE_WITH_YOUR_PROJECT.firebaseapp.com",
-  projectId: "REPLACE_WITH_YOUR_PROJECT_ID",
-  storageBucket: "REPLACE_WITH_YOUR_PROJECT.firebasestorage.app",
-  messagingSenderId: "REPLACE_WITH_YOUR_MESSAGING_SENDER_ID",
-  appId: "REPLACE_WITH_YOUR_APP_ID"
+// --- Firebase Initialization (Using your existing matrixflow credentials) ---
+const firebaseConfig = {
+  apiKey: "AIzaSyAB9kNgAo-uKo731h4VsKo1Flg6PlC7rxc",
+  authDomain: "matrixflow-b7153.firebaseapp.com",
+  projectId: "matrixflow-b7153",
+  storageBucket: "matrixflow-b7153.firebasestorage.app",
+  messagingSenderId: "407509617388",
+  appId: "1:407509617388:web:9952d5562090c13ae833c9",
 };
 
-// --- Determine Environment & Configuration ---
-let firebaseConfigObj: any;
-let isCanvasEnv = false;
+const firebaseApp = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+const auth = getAuth(firebaseApp);
+const db = getFirestore(firebaseApp);
 
-try {
-  if (typeof __firebase_config !== 'undefined' && __firebase_config) {
-    firebaseConfigObj = JSON.parse(__firebase_config);
-    isCanvasEnv = true;
-  } else {
-    firebaseConfigObj = VERCEL_FIREBASE_CONFIG;
-  }
-} catch (e) {
-  firebaseConfigObj = VERCEL_FIREBASE_CONFIG;
-}
-
-const needsFirebaseSetup = !isCanvasEnv && firebaseConfigObj.apiKey.includes("REPLACE");
-
-// --- Initialize Firebase Safely ---
-let firebaseApp: any;
-let auth: any;
-let db: any;
-let appId = "work-flow-production";
-
-if (!needsFirebaseSetup) {
-  firebaseApp = getApps().length === 0 ? initializeApp(firebaseConfigObj) : getApp();
-  auth = getAuth(firebaseApp);
-  db = getFirestore(firebaseApp);
-  try {
-    if (typeof __app_id !== 'undefined') appId = __app_id;
-  } catch (e) {}
-}
+// Standardize the App ID so all devices point to the same global folder
+const appId = typeof window !== "undefined" && (window as any).__app_id ? (window as any).__app_id : "workflow-production";
 
 // --- Task Type Interface ---
 interface Task {
@@ -76,7 +47,7 @@ interface Task {
 }
 
 // --- Gemini API Helper ---
-const apiKey = "AQ.Ab8RN6LgpSptaA" + "EIApT75yFCKwSKhCP" + "zXsF1GhDtjRvn-HS6Rw";
+const apiKey = "AQ.Ab8RN6LgpSptaAEIApT75yFCKwSKhCPzXsF1GhDtjRvn-HS6Rw";
 
 const callGeminiWithRetry = async (prompt: string, systemInstruction: string, jsonSchema: any = null): Promise<any> => {
   const models = ["gemini-1.5-flash", "gemini-2.5-flash-preview-09-2025", "gemini-2.5-flash"];
@@ -164,34 +135,6 @@ const triggerDesktopNotification = (title: string, body: string) => {
 };
 
 export default function App() {
-  // If deployed to Vercel without configuring Firebase, block execution and show instructions.
-  if (needsFirebaseSetup) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 font-sans">
-        <div className="bg-white border-l-4 border-red-500 shadow-xl p-8 rounded-xl max-w-2xl text-slate-800">
-          <h1 className="text-2xl font-black text-red-600 mb-4 flex items-center gap-3">
-            <AlertTriangle className="w-8 h-8" />
-            Database Configuration Required
-          </h1>
-          <p className="text-base mb-4 font-medium text-slate-700 leading-relaxed">
-            I watched the screen recording! The reason your tasks disappear when you close the app on your iPhone is because Vercel does not have a built-in database. It was trying to save to a dummy placeholder database which was silently rejecting the data.
-          </p>
-          <div className="bg-blue-50 p-5 rounded-lg mb-6 border border-blue-100">
-            <h2 className="font-bold text-blue-800 mb-3 flex items-center gap-2"><Workflow className="w-5 h-5"/> Fix this for your Project Defense:</h2>
-            <ol className="list-decimal pl-5 space-y-3 text-sm text-blue-900 font-medium">
-              <li>Go to <a href="https://console.firebase.google.com" target="_blank" rel="noreferrer" className="underline font-bold">console.firebase.google.com</a> and create a free project.</li>
-              <li>Click the <b>Web (&lt;/&gt;)</b> icon to register an app and copy your <code>firebaseConfig</code> code block.</li>
-              <li>Go to <b>Build &gt; Firestore Database</b> on the left menu and click 'Create database' (Ensure you Start in <b>Test Mode</b>).</li>
-              <li>Go to <b>Build &gt; Authentication</b>, click 'Get Started', and enable the <b>Email/Password</b> provider.</li>
-              <li>Open <code>App.tsx</code> in your code, find <code>VERCEL_FIREBASE_CONFIG</code> at the very top, and replace the dummy keys with your real keys.</li>
-            </ol>
-          </div>
-          <p className="text-sm text-slate-500 italic">Once you paste your keys and commit to GitHub, Vercel will deploy your fully working backend and your tasks will sync perfectly forever!</p>
-        </div>
-      </div>
-    );
-  }
-
   const [user, setUser] = useState<User | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -378,12 +321,16 @@ export default function App() {
     }
 
     let isMounted = true;
+    const isCanvasEnv = typeof window !== 'undefined' && (window as any).__app_id;
     
     const initializeAuth = async () => {
-      // 1. Await Firebase's internal restoration of the session from IndexedDB.
+      // 1. Set pure local persistence to lock the user session in the browser across refreshes
+      await setPersistence(auth, browserLocalPersistence);
+      
+      // 2. Wait for Firebase to naturally restore the session from IndexedDB
       await auth.authStateReady(); 
       
-      // 2. Only inject a temporary session if the app is inside the Canvas editor 
+      // 3. Fallback for the preview Canvas ONLY. (Vercel users will simply see the login screen)
       if (isCanvasEnv && !auth.currentUser) {
         try {
           const initialToken = (window as any).__initial_auth_token;
@@ -392,14 +339,17 @@ export default function App() {
         } catch (e) {}
       }
 
-      // 3. Unblock the loading screen once state is firmly established.
       if (isMounted) setIsAuthLoading(false);
     };
 
     initializeAuth();
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      if (isMounted) setUser(currentUser);
+      if (isMounted) {
+        setUser(currentUser);
+        // Force loading to clear instantly once user state resolves
+        setIsAuthLoading(false);
+      }
     });
 
     return () => {
@@ -511,19 +461,23 @@ export default function App() {
     setAuthEmail('');
     setAuthPassword('');
     setShowLandingPage(true);
+    setUser(null);
     try { await signOut(auth); } catch (e) { console.error(e); }
   };
 
-  // Data Fetching Sync 
+  // Data Fetching Sync
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
-    if (isGuest || !user) return;
+    if (isGuest || !user) {
+      setTasks([]);
+      return;
+    }
+
     setSyncing(true);
-    
     const q = query(collection(db, 'artifacts', appId, 'users', user.uid, 'tasks'));
 
     const unsubscribe = onSnapshot(q, 
